@@ -186,4 +186,3 @@ describe('RequestLog', () => {
     expect(log.getAll()).toHaveLength(1)
   })
 })
-
