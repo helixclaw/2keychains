@@ -22,6 +22,10 @@ export interface SecretsFile {
   secrets: SecretEntry[]
 }
 
+/**
+ * Legacy AccessRequest shape used by NotificationChannel.
+ * The canonical model is in request.ts -- the WorkflowEngine bridges the two.
+ */
 export interface AccessRequest {
   uuid: string
   requester: string

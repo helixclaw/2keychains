@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-export type AccessRequestStatus = 'pending' | 'approved' | 'denied' | 'expired'
+export type AccessRequestStatus = 'pending' | 'approved' | 'denied' | 'expired' | 'timeout'
 
 export interface AccessRequest {
   id: string
