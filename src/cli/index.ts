@@ -8,6 +8,7 @@ import { configCommand } from './config.js'
 import { openclawCommand } from './openclaw.js'
 import { requestCommand } from './request.js'
 import { secretsCommand } from './secrets.js'
+import { serverCommand } from './server.js'
 
 const pkg = JSON.parse(
   readFileSync(resolve(import.meta.dirname, '../../package.json'), 'utf-8'),
@@ -24,5 +25,6 @@ program.addCommand(openclawCommand)
 program.addCommand(secretsCommand)
 program.addCommand(configCommand)
 program.addCommand(requestCommand)
+program.addCommand(serverCommand)
 
 program.parse()
