@@ -8,8 +8,6 @@ export function createServer(config: AppConfig): FastifyInstance {
     },
   })
 
-  server.decorate('config', config)
-
   server.get('/health', async () => {
     return { status: 'ok', uptime: process.uptime() }
   })
@@ -20,7 +18,8 @@ export function createServer(config: AppConfig): FastifyInstance {
 
   server.setErrorHandler(async (error: FastifyError, _request, reply) => {
     const statusCode = error.statusCode ?? 500
-    await reply.status(statusCode).send({ error: error.message, statusCode })
+    const message = statusCode >= 500 ? 'Internal Server Error' : error.message
+    await reply.status(statusCode).send({ error: message, statusCode })
   })
 
   return server
@@ -34,10 +33,11 @@ export async function startServer(config: AppConfig): Promise<FastifyInstance> {
   const shutdown = async () => {
     server.log.info('Shutting down server...')
     await server.close()
+    process.exit(0)
   }
 
-  process.on('SIGINT', shutdown)
-  process.on('SIGTERM', shutdown)
+  process.once('SIGINT', shutdown)
+  process.once('SIGTERM', shutdown)
 
   server.addHook('onClose', async () => {
     process.removeListener('SIGINT', shutdown)
