@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { configCommand } from './config.js'
+import { openclawCommand } from './openclaw.js'
 import { requestCommand } from './request.js'
 import { secretsCommand } from './secrets.js'
 
@@ -19,6 +20,7 @@ program
   .description('A local secret broker with controlled access and approval flows')
   .version(pkg.version)
 
+program.addCommand(openclawCommand)
 program.addCommand(secretsCommand)
 program.addCommand(configCommand)
 program.addCommand(requestCommand)
