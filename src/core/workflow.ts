@@ -1,7 +1,8 @@
 import type { NotificationChannel } from '../channels/channel.js'
 import type { AccessRequest } from './request.js'
 import type { AccessRequest as ChannelAccessRequest } from './types.js'
-import type { SecretMetadata, SecretStore } from './secret-store.js'
+import type { SecretStore } from './secret-store.js'
+import type { SecretMetadata } from './types.js'
 import type { AppConfig } from './config.js'
 
 export interface WorkflowDeps {
