@@ -33,3 +33,9 @@ export interface AccessRequest {
   durationMs: number
   secretName: string
 }
+
+export interface ProcessResult {
+  exitCode: number | null
+  stdout: string
+  stderr: string
+}
