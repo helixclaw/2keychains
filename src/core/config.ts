@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
+import { resolve, dirname } from 'node:path'
 import { homedir } from 'node:os'
 
 export interface DiscordConfig {
@@ -15,7 +15,7 @@ export interface AppConfig {
   approvalTimeoutMs: number
 }
 
-const CONFIG_PATH = resolve(homedir(), '.2kc', 'config.json')
+export const CONFIG_PATH = resolve(homedir(), '.2kc', 'config.json')
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -92,4 +92,11 @@ export function loadConfig(configPath: string = CONFIG_PATH): AppConfig {
   }
 
   return parseConfig(parsed)
+}
+
+export function saveConfig(config: AppConfig, configPath: string = CONFIG_PATH): void {
+  const dir = dirname(configPath)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+  chmodSync(configPath, 0o600)
 }

@@ -4,6 +4,8 @@ import { Command } from 'commander'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import { configCommand } from './config.js'
+import { requestCommand } from './request.js'
 import { secretsCommand } from './secrets.js'
 
 const pkg = JSON.parse(
@@ -18,5 +20,7 @@ program
   .version(pkg.version)
 
 program.addCommand(secretsCommand)
+program.addCommand(configCommand)
+program.addCommand(requestCommand)
 
 program.parse()
