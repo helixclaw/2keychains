@@ -42,26 +42,29 @@ const request = new Command('request')
       },
     ) => {
       try {
-        // 1. Load config
-        let config
-        try {
-          config = loadConfig()
-        } catch (err: unknown) {
-          if (err instanceof Error && err.message.includes('Config file not found')) {
-            console.error('Config not found. Run: 2kc config init')
-            process.exitCode = 1
-            return
-          }
-          throw err
+        // 1. Load config (returns defaults if file missing)
+        const config = loadConfig()
+
+        // 2. Validate discord is configured
+        if (
+          !config.discord?.webhookUrl ||
+          !config.discord?.botToken ||
+          !config.discord?.channelId
+        ) {
+          console.error(
+            'Discord not configured. Run: 2kc config init --webhook-url <url> --bot-token <token> --channel-id <id>',
+          )
+          process.exitCode = 1
+          return
         }
 
-        // 2. Instantiate components
+        // 3. Instantiate components
         const store = new SecretStore()
         const channel = new DiscordChannel(config.discord)
         const grantManager = new GrantManager()
         const injector = new SecretInjector(grantManager, store)
 
-        // 3. Create access request
+        // 4. Create access request
         const durationSeconds = parseInt(opts.duration, 10)
         if (Number.isNaN(durationSeconds) || durationSeconds <= 0) {
           console.error('Invalid --duration: must be a positive integer (seconds)')
@@ -79,7 +82,7 @@ const request = new Command('request')
           ),
         )
 
-        // 4. Process approval workflow
+        // 5. Process approval workflow
         const engine = new WorkflowEngine({ store, channel, config })
         const result = await engine.processRequest(accessRequest)
         await auditLog(
@@ -97,10 +100,10 @@ const request = new Command('request')
           return
         }
 
-        // 5. Create grant
+        // 6. Create grant
         const grant = grantManager.createGrant(accessRequest)
 
-        // 6. Inject secret and run command
+        // 7. Inject secret and run command
         const command = ['sh', '-c', opts.cmd]
         await auditLog(
           channel,
@@ -118,7 +121,7 @@ const request = new Command('request')
           formatAuditMessage(accessRequest.id, 'Grant used', `grantId=${grant.id}, uuid=${uuid}`),
         )
 
-        // 7. Output result
+        // 8. Output result
         if (processResult.stdout) process.stdout.write(processResult.stdout)
         if (processResult.stderr) process.stderr.write(processResult.stderr)
         // Map null exit code (signal-killed processes) to exit code 1 intentionally,

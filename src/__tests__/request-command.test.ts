@@ -71,6 +71,9 @@ vi.mock('../core/request.js', () => ({
 
 function createTestConfig(): AppConfig {
   return {
+    mode: 'standalone',
+    server: { host: '127.0.0.1', port: 2274 },
+    store: { path: '~/.2kc/secrets.json' },
     discord: {
       webhookUrl: 'https://discord.com/api/webhooks/123/abc',
       botToken: 'bot-token-123',
@@ -206,14 +209,15 @@ describe('request command orchestration', () => {
     errorSpy.mockRestore()
   })
 
-  it('config file missing: prints actionable error pointing to "2kc config init"', async () => {
-    const configError = new Error('Config file not found: /path/to/config.json')
-    mockLoadConfig.mockImplementation(() => {
-      throw configError
+  it('discord not configured: prints actionable error pointing to "2kc config init"', async () => {
+    mockLoadConfig.mockReturnValue({
+      ...createTestConfig(),
+      discord: undefined,
     })
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     await runRequest()
 
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Discord not configured'))
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('config init'))
     expect(process.exitCode).toBe(1)
     errorSpy.mockRestore()
