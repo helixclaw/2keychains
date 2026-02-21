@@ -8,14 +8,34 @@ export interface DiscordConfig {
   channelId: string
 }
 
+export interface ServerConfig {
+  host: string
+  port: number
+  authToken?: string
+}
+
+export interface StoreConfig {
+  path: string
+}
+
 export interface AppConfig {
-  discord: DiscordConfig
+  mode: 'standalone' | 'client'
+  server: ServerConfig
+  store: StoreConfig
+  discord?: DiscordConfig
   requireApproval: Record<string, boolean>
   defaultRequireApproval: boolean
   approvalTimeoutMs: number
 }
 
 export const CONFIG_PATH = resolve(homedir(), '.2kc', 'config.json')
+
+export function resolveTilde(p: string): string {
+  if (p.startsWith('~/') || p === '~') {
+    return resolve(homedir(), p.slice(2))
+  }
+  return p
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -32,37 +52,102 @@ function parseRequireApproval(raw: unknown): Record<string, boolean> {
   return result
 }
 
+function parseDiscordConfig(raw: unknown): DiscordConfig | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (!isRecord(raw)) {
+    throw new Error('discord must be an object')
+  }
+
+  const webhookUrl = raw.webhookUrl
+  if (typeof webhookUrl !== 'string' || webhookUrl === '') {
+    throw new Error('discord.webhookUrl must be a non-empty string')
+  }
+
+  const channelId = raw.channelId
+  if (typeof channelId !== 'string' || channelId === '') {
+    throw new Error('discord.channelId must be a non-empty string')
+  }
+
+  const botToken = raw.botToken
+  if (typeof botToken !== 'string' || botToken === '') {
+    throw new Error('discord.botToken must be a non-empty string')
+  }
+
+  return { webhookUrl, botToken, channelId }
+}
+
+function parseServerConfig(raw: unknown): ServerConfig {
+  const defaults: ServerConfig = { host: '127.0.0.1', port: 2274 }
+  if (raw === undefined || raw === null) return defaults
+  if (!isRecord(raw)) {
+    throw new Error('server must be an object')
+  }
+
+  const host = raw.host !== undefined ? raw.host : defaults.host
+  if (typeof host !== 'string' || host === '') {
+    throw new Error('server.host must be a non-empty string')
+  }
+
+  const port = raw.port !== undefined ? raw.port : defaults.port
+  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('server.port must be an integer between 1 and 65535')
+  }
+
+  const result: ServerConfig = { host, port }
+
+  if (raw.authToken !== undefined) {
+    if (typeof raw.authToken !== 'string' || raw.authToken === '') {
+      throw new Error('server.authToken must be a non-empty string when provided')
+    }
+    result.authToken = raw.authToken
+  }
+
+  return result
+}
+
+function parseStoreConfig(raw: unknown): StoreConfig {
+  const defaultPath = '~/.2kc/secrets.json'
+  if (raw === undefined || raw === null) return { path: resolveTilde(defaultPath) }
+  if (!isRecord(raw)) {
+    throw new Error('store must be an object')
+  }
+
+  const path = raw.path !== undefined ? raw.path : defaultPath
+  if (typeof path !== 'string' || path === '') {
+    throw new Error('store.path must be a non-empty string')
+  }
+
+  return { path: resolveTilde(path) }
+}
+
+export function defaultConfig(): AppConfig {
+  return {
+    mode: 'standalone',
+    server: { host: '127.0.0.1', port: 2274 },
+    store: { path: resolveTilde('~/.2kc/secrets.json') },
+    discord: undefined,
+    requireApproval: {},
+    defaultRequireApproval: false,
+    approvalTimeoutMs: 300_000,
+  }
+}
+
 export function parseConfig(raw: unknown): AppConfig {
   if (!isRecord(raw)) {
     throw new Error('Config must be a JSON object')
   }
 
-  const discord = raw.discord
-  if (!isRecord(discord)) {
-    throw new Error('Config must contain a "discord" object')
-  }
-
-  const webhookUrl = discord.webhookUrl
-  if (typeof webhookUrl !== 'string' || webhookUrl === '') {
-    throw new Error('discord.webhookUrl must be a non-empty string')
-  }
-
-  const channelId = discord.channelId
-  if (typeof channelId !== 'string' || channelId === '') {
-    throw new Error('discord.channelId must be a non-empty string')
-  }
-
-  const botToken = discord.botToken
-  if (typeof botToken !== 'string' || botToken === '') {
-    throw new Error('discord.botToken must be a non-empty string')
+  // Parse mode
+  const mode = raw.mode !== undefined ? raw.mode : 'standalone'
+  if (mode !== 'standalone' && mode !== 'client') {
+    throw new Error('mode must be "standalone" or "client"')
   }
 
   return {
-    discord: {
-      webhookUrl,
-      botToken,
-      channelId,
-    },
+    mode,
+    server: parseServerConfig(raw.server),
+    store: parseStoreConfig(raw.store),
+    discord: parseDiscordConfig(raw.discord),
     requireApproval: parseRequireApproval(raw.requireApproval),
     defaultRequireApproval:
       typeof raw.defaultRequireApproval === 'boolean' ? raw.defaultRequireApproval : false,
@@ -79,7 +164,7 @@ export function loadConfig(configPath: string = CONFIG_PATH): AppConfig {
     raw = readFileSync(configPath, 'utf-8')
   } catch (err: unknown) {
     if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(`Config file not found: ${configPath}`)
+      return defaultConfig()
     }
     throw err
   }

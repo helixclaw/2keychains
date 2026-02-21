@@ -11,9 +11,23 @@ vi.mock('node:os', () => ({
 }))
 
 import { readFileSync } from 'node:fs'
-import { loadConfig, parseConfig } from '../core/config.js'
+import { loadConfig, parseConfig, resolveTilde } from '../core/config.js'
 
 const mockReadFileSync = vi.mocked(readFileSync)
+
+describe('resolveTilde', () => {
+  it('replaces leading ~ with homedir', () => {
+    expect(resolveTilde('~/.2kc/secrets.json')).toBe(join('/tmp/test-home', '.2kc', 'secrets.json'))
+  })
+
+  it('leaves absolute paths unchanged', () => {
+    expect(resolveTilde('/absolute/path')).toBe('/absolute/path')
+  })
+
+  it('resolves bare ~ to homedir', () => {
+    expect(resolveTilde('~')).toBe('/tmp/test-home')
+  })
+})
 
 describe('loadConfig', () => {
   afterEach(() => {
@@ -39,14 +53,21 @@ describe('loadConfig', () => {
     expect(config.discord).toEqual(validConfig.discord)
   })
 
-  it('should throw descriptive error when config file is missing', () => {
+  it('should return default standalone config when file is missing', () => {
     const err = new Error('ENOENT') as NodeJS.ErrnoException
     err.code = 'ENOENT'
     mockReadFileSync.mockImplementation(() => {
       throw err
     })
 
-    expect(() => loadConfig()).toThrow('Config file not found: /tmp/test-home/.2kc/config.json')
+    const config = loadConfig()
+    expect(config.mode).toBe('standalone')
+    expect(config.server).toEqual({ host: '127.0.0.1', port: 2274 })
+    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.json'))
+    expect(config.discord).toBeUndefined()
+    expect(config.requireApproval).toEqual({})
+    expect(config.defaultRequireApproval).toBe(false)
+    expect(config.approvalTimeoutMs).toBe(300_000)
   })
 
   it('should throw on invalid JSON', () => {
@@ -55,15 +76,19 @@ describe('loadConfig', () => {
     expect(() => loadConfig()).toThrow('Invalid JSON in config file')
   })
 
-  it('should throw when discord section is missing entirely', () => {
-    mockReadFileSync.mockReturnValue(JSON.stringify({ someOtherKey: true }))
+  it('should allow config without discord section', () => {
+    mockReadFileSync.mockReturnValue(JSON.stringify({ mode: 'standalone' }))
 
-    expect(() => loadConfig()).toThrow('Config must contain a "discord" object')
+    const config = loadConfig()
+    expect(config.discord).toBeUndefined()
+    expect(config.mode).toBe('standalone')
   })
 })
 
 describe('parseConfig', () => {
-  const minimalValid = {
+  const minimalValid = {}
+
+  const withDiscord = {
     discord: {
       webhookUrl: 'https://discord.com/api/webhooks/123/abc',
       channelId: '123456',
@@ -71,16 +96,99 @@ describe('parseConfig', () => {
     },
   }
 
-  it('parses a minimal config with default approval fields', () => {
+  it('parses a minimal config with all defaults', () => {
     const config = parseConfig(minimalValid)
+    expect(config.mode).toBe('standalone')
+    expect(config.server).toEqual({ host: '127.0.0.1', port: 2274 })
+    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.json'))
+    expect(config.discord).toBeUndefined()
     expect(config.requireApproval).toEqual({})
     expect(config.defaultRequireApproval).toBe(false)
     expect(config.approvalTimeoutMs).toBe(300_000)
   })
 
+  it('parses mode field (standalone)', () => {
+    const config = parseConfig({ mode: 'standalone' })
+    expect(config.mode).toBe('standalone')
+  })
+
+  it('parses mode field (client)', () => {
+    const config = parseConfig({ mode: 'client' })
+    expect(config.mode).toBe('client')
+  })
+
+  it('defaults mode to standalone when missing', () => {
+    const config = parseConfig({})
+    expect(config.mode).toBe('standalone')
+  })
+
+  it('throws on invalid mode value', () => {
+    expect(() => parseConfig({ mode: 'invalid' })).toThrow('mode must be "standalone" or "client"')
+  })
+
+  it('parses server config with defaults', () => {
+    const config = parseConfig({})
+    expect(config.server.host).toBe('127.0.0.1')
+    expect(config.server.port).toBe(2274)
+    expect(config.server.authToken).toBeUndefined()
+  })
+
+  it('parses server config with custom values', () => {
+    const config = parseConfig({
+      server: { host: '192.168.1.1', port: 8080, authToken: 'my-secret-token' },
+    })
+    expect(config.server.host).toBe('192.168.1.1')
+    expect(config.server.port).toBe(8080)
+    expect(config.server.authToken).toBe('my-secret-token')
+  })
+
+  it('throws on invalid server.port (non-number)', () => {
+    expect(() => parseConfig({ server: { port: 'abc' } })).toThrow(
+      'server.port must be an integer between 1 and 65535',
+    )
+  })
+
+  it('throws on invalid server.port (out of range)', () => {
+    expect(() => parseConfig({ server: { port: 99999 } })).toThrow(
+      'server.port must be an integer between 1 and 65535',
+    )
+  })
+
+  it('throws on invalid server.port (zero)', () => {
+    expect(() => parseConfig({ server: { port: 0 } })).toThrow(
+      'server.port must be an integer between 1 and 65535',
+    )
+  })
+
+  it('throws on server.authToken being empty string when provided', () => {
+    expect(() => parseConfig({ server: { authToken: '' } })).toThrow(
+      'server.authToken must be a non-empty string when provided',
+    )
+  })
+
+  it('parses store.path and resolves ~ to homedir', () => {
+    const config = parseConfig({ store: { path: '~/.2kc/my-secrets.json' } })
+    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'my-secrets.json'))
+  })
+
+  it('uses default store.path when missing', () => {
+    const config = parseConfig({})
+    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.json'))
+  })
+
+  it('allows config with no discord section (all optional)', () => {
+    const config = parseConfig({})
+    expect(config.discord).toBeUndefined()
+  })
+
+  it('parses discord config when present', () => {
+    const config = parseConfig(withDiscord)
+    expect(config.discord).toEqual(withDiscord.discord)
+  })
+
   it('parses config with approval fields', () => {
     const config = parseConfig({
-      ...minimalValid,
+      ...withDiscord,
       requireApproval: { production: true, dev: false },
       defaultRequireApproval: true,
       approvalTimeoutMs: 60_000,
@@ -92,7 +200,7 @@ describe('parseConfig', () => {
 
   it('ignores non-boolean values in requireApproval', () => {
     const config = parseConfig({
-      ...minimalValid,
+      ...withDiscord,
       requireApproval: { production: true, bad: 'yes', worse: 42 },
     })
     expect(config.requireApproval).toEqual({ production: true })
@@ -100,7 +208,6 @@ describe('parseConfig', () => {
 
   it('defaults approvalTimeoutMs for invalid values', () => {
     const config = parseConfig({
-      ...minimalValid,
       approvalTimeoutMs: -1,
     })
     expect(config.approvalTimeoutMs).toBe(300_000)
@@ -108,17 +215,6 @@ describe('parseConfig', () => {
 
   it('throws if config is not an object', () => {
     expect(() => parseConfig('string')).toThrow('Config must be a JSON object')
-  })
-
-  it('throws if discord config is missing', () => {
-    expect(() => parseConfig({})).toThrow('Config must contain a "discord" object')
-  })
-
-  it('parses discord config fields', () => {
-    const config = parseConfig(minimalValid)
-    expect(config.discord.webhookUrl).toBe('https://discord.com/api/webhooks/123/abc')
-    expect(config.discord.channelId).toBe('123456')
-    expect(config.discord.botToken).toBe('bot-token')
   })
 
   it('throws if discord.webhookUrl is missing', () => {
