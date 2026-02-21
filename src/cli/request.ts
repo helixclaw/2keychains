@@ -1,26 +1,7 @@
 import { Command } from 'commander'
 
 import { loadConfig } from '../core/config.js'
-import { SecretStore } from '../core/secret-store.js'
-import { DiscordChannel } from '../channels/discord.js'
-import { WorkflowEngine } from '../core/workflow.js'
-import { GrantManager } from '../core/grant.js'
-import { SecretInjector } from '../core/injector.js'
-import { createAccessRequest } from '../core/request.js'
-import type { NotificationChannel } from '../channels/channel.js'
-
-async function auditLog(channel: NotificationChannel, message: string): Promise<void> {
-  try {
-    await channel.sendNotification(message)
-  } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : String(err)
-    console.error(`[audit] Warning: failed to send audit log: ${errorMessage}`)
-  }
-}
-
-function formatAuditMessage(requestId: string, event: string, details: string): string {
-  return `[2kc] [${new Date().toISOString()}] [${requestId}] ${event}: ${details}`
-}
+import { resolveService } from '../core/service.js'
 
 const request = new Command('request')
   .description('Request access to a secret and inject into a command')
@@ -42,29 +23,11 @@ const request = new Command('request')
       },
     ) => {
       try {
-        // 1. Load config (returns defaults if file missing)
+        // 1. Load config and resolve service
         const config = loadConfig()
+        const service = resolveService(config)
 
-        // 2. Validate discord is configured
-        if (
-          !config.discord?.webhookUrl ||
-          !config.discord?.botToken ||
-          !config.discord?.channelId
-        ) {
-          console.error(
-            'Discord not configured. Run: 2kc config init --webhook-url <url> --bot-token <token> --channel-id <id>',
-          )
-          process.exitCode = 1
-          return
-        }
-
-        // 3. Instantiate components
-        const store = new SecretStore()
-        const channel = new DiscordChannel(config.discord)
-        const grantManager = new GrantManager()
-        const injector = new SecretInjector(grantManager, store)
-
-        // 4. Create access request
+        // 2. Parse and validate duration
         const durationSeconds = parseInt(opts.duration, 10)
         if (Number.isNaN(durationSeconds) || durationSeconds <= 0) {
           console.error('Invalid --duration: must be a positive integer (seconds)')
@@ -72,56 +35,26 @@ const request = new Command('request')
           return
         }
 
-        const accessRequest = createAccessRequest(uuid, opts.reason, opts.task, durationSeconds)
-        await auditLog(
-          channel,
-          formatAuditMessage(
-            accessRequest.id,
-            'Request created',
-            `uuid=${uuid}, reason="${opts.reason}", task="${opts.task}", duration=${opts.duration}s`,
-          ),
+        // 3. Create access request via service
+        const accessRequest = await service.requests.create(
+          uuid,
+          opts.reason,
+          opts.task,
+          durationSeconds,
         )
 
-        // 5. Process approval workflow
-        const engine = new WorkflowEngine({ store, channel, config })
-        const result = await engine.processRequest(accessRequest)
-        await auditLog(
-          channel,
-          formatAuditMessage(
-            accessRequest.id,
-            `Approval ${result}`,
-            `uuid=${uuid}, result=${result}`,
-          ),
-        )
-
-        if (result !== 'approved') {
-          console.error(`Access request ${result}: ${uuid}`)
+        // 4. Validate grant
+        const isValid = await service.grants.validate(accessRequest.id)
+        if (!isValid) {
+          console.error(`Access request denied: ${uuid}`)
           process.exitCode = 1
           return
         }
 
-        // 6. Create grant
-        const grant = grantManager.createGrant(accessRequest)
+        // 5. Inject secret and run command
+        const processResult = await service.inject(accessRequest.id, opts.env, opts.cmd)
 
-        // 7. Inject secret and run command
-        const command = ['sh', '-c', opts.cmd]
-        await auditLog(
-          channel,
-          formatAuditMessage(
-            accessRequest.id,
-            'Secret injected',
-            `uuid=${uuid}, env=${opts.env}, command="${opts.cmd}"`,
-          ),
-        )
-
-        const processResult = await injector.inject(grant.id, opts.env, command)
-
-        await auditLog(
-          channel,
-          formatAuditMessage(accessRequest.id, 'Grant used', `grantId=${grant.id}, uuid=${uuid}`),
-        )
-
-        // 8. Output result
+        // 6. Output result
         if (processResult.stdout) process.stdout.write(processResult.stdout)
         if (processResult.stderr) process.stderr.write(processResult.stderr)
         // Map null exit code (signal-killed processes) to exit code 1 intentionally,

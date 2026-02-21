@@ -1,7 +1,8 @@
 import { Command } from 'commander'
 import { createInterface } from 'node:readline'
 
-import { SecretStore } from '../core/secret-store.js'
+import { loadConfig } from '../core/config.js'
+import { resolveService } from '../core/service.js'
 
 function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -55,28 +56,38 @@ secrets
       process.exitCode = 1
       return
     }
-    const store = new SecretStore()
-    const uuid = store.add(opts.name, value, opts.tags)
-    console.log(uuid)
+    const service = resolveService(loadConfig())
+    const result = await service.secrets.add(opts.name, value, opts.tags)
+    console.log(result.uuid)
   })
 
 secrets
   .command('list')
   .description('List all secrets (UUIDs and tags only)')
-  .action(() => {
-    const store = new SecretStore()
-    const items = store.list()
-    console.log(JSON.stringify(items, null, 2))
+  .action(async () => {
+    try {
+      const service = resolveService(loadConfig())
+      const items = await service.secrets.list()
+      console.log(JSON.stringify(items, null, 2))
+    } catch (err: unknown) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+      process.exitCode = 1
+    }
   })
 
 secrets
   .command('remove')
   .description('Remove a secret by UUID')
   .argument('<uuid>', 'UUID of the secret to remove')
-  .action((uuid: string) => {
-    const store = new SecretStore()
-    store.remove(uuid)
-    console.log('Removed')
+  .action(async (uuid: string) => {
+    try {
+      const service = resolveService(loadConfig())
+      await service.secrets.remove(uuid)
+      console.log('Removed')
+    } catch (err: unknown) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+      process.exitCode = 1
+    }
   })
 
 export { secrets as secretsCommand }

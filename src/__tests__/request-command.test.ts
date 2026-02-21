@@ -2,71 +2,44 @@
 
 import type { AppConfig } from '../core/config.js'
 import type { AccessRequest } from '../core/request.js'
-import type { AccessGrant } from '../core/grant.js'
-import type { ProcessResult } from '../core/types.js'
+import type { Service } from '../core/service.js'
 
 const mockLoadConfig = vi.fn<() => AppConfig>()
-const mockSendNotification = vi.fn<(message: string) => Promise<void>>()
-const mockSendApprovalRequest = vi.fn<() => Promise<string>>()
-const mockWaitForResponse = vi.fn<() => Promise<'approved' | 'denied' | 'timeout'>>()
-const mockProcessRequest = vi.fn<() => Promise<'approved' | 'denied' | 'timeout'>>()
-const mockCreateGrant = vi.fn<(req: AccessRequest) => AccessGrant>()
-const mockValidateGrant = vi.fn<() => boolean>()
-const mockGetGrant = vi.fn()
-const mockMarkUsed = vi.fn()
-const mockInject = vi.fn<() => Promise<ProcessResult>>()
-const mockCreateAccessRequest = vi.fn(
-  (secretUuid: string, reason: string, taskRef: string, durationSeconds: number) => ({
-    id: 'test-request-id',
-    secretUuid,
-    reason,
-    taskRef,
-    durationSeconds,
-    requestedAt: '2026-01-01T00:00:00.000Z',
-    status: 'pending' as const,
-  }),
-)
+
+const mockRequestsCreate = vi.fn<Service['requests']['create']>()
+const mockGrantsValidate = vi.fn<Service['grants']['validate']>()
+const mockInject = vi.fn<Service['inject']>()
+const mockHealth = vi.fn<Service['health']>()
+const mockSecretsList = vi.fn<Service['secrets']['list']>()
+const mockSecretsAdd = vi.fn<Service['secrets']['add']>()
+const mockSecretsRemove = vi.fn<Service['secrets']['remove']>()
+const mockSecretsGetMetadata = vi.fn<Service['secrets']['getMetadata']>()
+
+const mockService: Service = {
+  health: mockHealth,
+  secrets: {
+    list: mockSecretsList,
+    add: mockSecretsAdd,
+    remove: mockSecretsRemove,
+    getMetadata: mockSecretsGetMetadata,
+  },
+  requests: {
+    create: mockRequestsCreate,
+  },
+  grants: {
+    validate: mockGrantsValidate,
+  },
+  inject: mockInject,
+}
+
+const mockResolveService = vi.fn<() => Service>()
 
 vi.mock('../core/config.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...(args as [])),
 }))
 
-vi.mock('../core/secret-store.js', () => ({
-  SecretStore: vi.fn(),
-}))
-
-vi.mock('../channels/discord.js', () => ({
-  DiscordChannel: vi.fn().mockImplementation(() => ({
-    sendApprovalRequest: mockSendApprovalRequest,
-    waitForResponse: mockWaitForResponse,
-    sendNotification: (...args: unknown[]) => mockSendNotification(...(args as [string])),
-  })),
-}))
-
-vi.mock('../core/workflow.js', () => ({
-  WorkflowEngine: vi.fn().mockImplementation(() => ({
-    processRequest: (...args: unknown[]) => mockProcessRequest(...(args as [])),
-  })),
-}))
-
-vi.mock('../core/grant.js', () => ({
-  GrantManager: vi.fn().mockImplementation(() => ({
-    createGrant: (...args: unknown[]) => mockCreateGrant(...(args as [AccessRequest])),
-    validateGrant: (...args: unknown[]) => mockValidateGrant(...(args as [])),
-    getGrant: (...args: unknown[]) => mockGetGrant(...(args as [])),
-    markUsed: (...args: unknown[]) => mockMarkUsed(...(args as [])),
-  })),
-}))
-
-vi.mock('../core/injector.js', () => ({
-  SecretInjector: vi.fn().mockImplementation(() => ({
-    inject: (...args: unknown[]) => mockInject(...(args as [])),
-  })),
-}))
-
-vi.mock('../core/request.js', () => ({
-  createAccessRequest: (...args: unknown[]) =>
-    mockCreateAccessRequest(...(args as [string, string, string, number])),
+vi.mock('../core/service.js', () => ({
+  resolveService: (...args: unknown[]) => mockResolveService(...(args as [])),
 }))
 
 function createTestConfig(): AppConfig {
@@ -85,15 +58,15 @@ function createTestConfig(): AppConfig {
   }
 }
 
-function createTestGrant(overrides?: Partial<AccessGrant>): AccessGrant {
+function createTestAccessRequest(overrides?: Partial<AccessRequest>): AccessRequest {
   return {
-    id: 'test-grant-id',
-    requestId: 'test-request-id',
+    id: 'test-request-id',
     secretUuid: 'test-secret-uuid',
-    grantedAt: '2026-01-01T00:00:00.000Z',
-    expiresAt: '2026-01-01T00:05:00.000Z',
-    used: false,
-    revokedAt: null,
+    reason: 'need for deploy',
+    taskRef: 'TICKET-123',
+    durationSeconds: 300,
+    requestedAt: '2026-01-01T00:00:00.000Z',
+    status: 'pending',
     ...overrides,
   }
 }
@@ -123,10 +96,10 @@ describe('request command orchestration', () => {
     process.exitCode = undefined
 
     mockLoadConfig.mockReturnValue(createTestConfig())
-    mockProcessRequest.mockResolvedValue('approved')
-    mockCreateGrant.mockReturnValue(createTestGrant())
+    mockResolveService.mockReturnValue(mockService)
+    mockRequestsCreate.mockResolvedValue(createTestAccessRequest())
+    mockGrantsValidate.mockResolvedValue(true)
     mockInject.mockResolvedValue({ exitCode: 0, stdout: 'output', stderr: '' })
-    mockSendNotification.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -134,130 +107,57 @@ describe('request command orchestration', () => {
     vi.clearAllMocks()
   })
 
-  it('happy path: approved request -> grant -> inject -> returns child exit code', async () => {
+  it('happy path: approved request -> validate grant -> inject -> returns child exit code', async () => {
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     await runRequest()
 
     expect(mockLoadConfig).toHaveBeenCalled()
-    expect(mockProcessRequest).toHaveBeenCalled()
-    expect(mockCreateGrant).toHaveBeenCalled()
-    expect(mockInject).toHaveBeenCalledWith('test-grant-id', 'MY_SECRET', [
-      'sh',
-      '-c',
-      'echo hello',
-    ])
+    expect(mockResolveService).toHaveBeenCalled()
+    expect(mockRequestsCreate).toHaveBeenCalledWith(
+      'test-secret-uuid',
+      'need for deploy',
+      'TICKET-123',
+      300,
+    )
+    expect(mockGrantsValidate).toHaveBeenCalledWith('test-request-id')
+    expect(mockInject).toHaveBeenCalledWith('test-request-id', 'MY_SECRET', 'echo hello')
     expect(stdoutSpy).toHaveBeenCalledWith('output')
     expect(process.exitCode).toBe(0)
     stdoutSpy.mockRestore()
   })
 
-  it('sends 4 audit log notifications in correct order', async () => {
-    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    await runRequest()
-
-    expect(mockSendNotification).toHaveBeenCalledTimes(4)
-    const calls = mockSendNotification.mock.calls.map((c) => c[0] as string)
-    expect(calls[0]).toContain('Request created')
-    expect(calls[1]).toContain('Approval approved')
-    expect(calls[2]).toContain('Secret injected')
-    expect(calls[3]).toContain('Grant used')
-  })
-
-  it('audit log messages include request ID and timestamp', async () => {
-    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    await runRequest()
-
-    const calls = mockSendNotification.mock.calls.map((c) => c[0] as string)
-    for (const msg of calls) {
-      expect(msg).toContain('[test-request-id]')
-      // ISO timestamp pattern: YYYY-MM-DDTHH:mm:ss
-      expect(msg).toMatch(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
-    }
-  })
-
-  it('audit log for injection does NOT include secret value', async () => {
-    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    await runRequest()
-
-    const injectionMsg = mockSendNotification.mock.calls[2][0] as string
-    expect(injectionMsg).toContain('Secret injected')
-    expect(injectionMsg).toContain('env=MY_SECRET')
-    expect(injectionMsg).toContain('command=')
-    // Should not contain any secret value -- only metadata
-    expect(injectionMsg).not.toContain('bot-token')
-  })
-
-  it('denied request: logs denial, exits with code 1, does NOT create grant', async () => {
-    mockProcessRequest.mockResolvedValue('denied')
+  it('denied request (grant not valid): exits with code 1', async () => {
+    mockGrantsValidate.mockResolvedValue(false)
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     await runRequest()
 
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('denied'))
     expect(process.exitCode).toBe(1)
-    expect(mockCreateGrant).not.toHaveBeenCalled()
+    expect(mockInject).not.toHaveBeenCalled()
     errorSpy.mockRestore()
   })
 
-  it('timeout request: logs timeout, exits with code 1', async () => {
-    mockProcessRequest.mockResolvedValue('timeout')
+  it('service.requests.create throws: exits with code 1', async () => {
+    mockRequestsCreate.mockRejectedValue(new Error('not implemented'))
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     await runRequest()
 
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('timeout'))
-    expect(process.exitCode).toBe(1)
-    expect(mockCreateGrant).not.toHaveBeenCalled()
-    errorSpy.mockRestore()
-  })
-
-  it('discord not configured: prints actionable error pointing to "2kc config init"', async () => {
-    mockLoadConfig.mockReturnValue({
-      ...createTestConfig(),
-      discord: undefined,
-    })
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    await runRequest()
-
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Discord not configured'))
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('config init'))
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('not implemented'))
     expect(process.exitCode).toBe(1)
     errorSpy.mockRestore()
   })
 
-  it('audit log failure (sendNotification throws): prints warning to stderr, continues main flow', async () => {
-    mockSendNotification.mockRejectedValue(new Error('Discord down'))
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    await runRequest()
-
-    // Should still complete the flow successfully
-    expect(mockInject).toHaveBeenCalled()
-    expect(stdoutSpy).toHaveBeenCalledWith('output')
-    expect(process.exitCode).toBe(0)
-
-    // Should have printed warnings for each failed audit
-    const errorCalls = errorSpy.mock.calls.map((c) => c[0] as string)
-    const auditWarnings = errorCalls.filter((msg) => msg.includes('[audit] Warning'))
-    expect(auditWarnings.length).toBeGreaterThan(0)
-    stdoutSpy.mockRestore()
-    errorSpy.mockRestore()
-  })
-
-  it('child process failure: still logs grant-used audit event', async () => {
+  it('child process failure: returns child exit code', async () => {
     mockInject.mockResolvedValue({ exitCode: 1, stdout: '', stderr: 'error output' })
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
     await runRequest()
-
-    // All 4 audit logs should still be sent
-    expect(mockSendNotification).toHaveBeenCalledTimes(4)
-    const lastAuditMsg = mockSendNotification.mock.calls[3][0] as string
-    expect(lastAuditMsg).toContain('Grant used')
 
     expect(stderrSpy).toHaveBeenCalledWith('error output')
     expect(process.exitCode).toBe(1)
     stderrSpy.mockRestore()
   })
 
-  it('--duration flag is passed through to createAccessRequest', async () => {
+  it('--duration flag is passed through to service.requests.create', async () => {
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     await runRequest([
       'test-secret-uuid',
@@ -273,7 +173,7 @@ describe('request command orchestration', () => {
       '600',
     ])
 
-    expect(mockCreateAccessRequest).toHaveBeenCalledWith(
+    expect(mockRequestsCreate).toHaveBeenCalledWith(
       'test-secret-uuid',
       'need for deploy',
       'TICKET-123',
@@ -285,11 +185,60 @@ describe('request command orchestration', () => {
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     await runRequest()
 
-    expect(mockCreateAccessRequest).toHaveBeenCalledWith(
+    expect(mockRequestsCreate).toHaveBeenCalledWith(
       'test-secret-uuid',
       'need for deploy',
       'TICKET-123',
       300,
     )
+  })
+
+  it('invalid duration: prints error and exits with code 1', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await runRequest([
+      'test-secret-uuid',
+      '--reason',
+      'need for deploy',
+      '--task',
+      'TICKET-123',
+      '--env',
+      'MY_SECRET',
+      '--cmd',
+      'echo hello',
+      '--duration',
+      'abc',
+    ])
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid --duration'))
+    expect(process.exitCode).toBe(1)
+    expect(mockRequestsCreate).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+
+  it('secret not found error: prints user-friendly message', async () => {
+    mockRequestsCreate.mockRejectedValue(new Error('Secret not found'))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await runRequest()
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Secret UUID not found'))
+    expect(process.exitCode).toBe(1)
+    errorSpy.mockRestore()
+  })
+
+  it('grant expired error: prints user-friendly message', async () => {
+    mockInject.mockRejectedValue(new Error('Grant is not valid'))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await runRequest()
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Grant expired'))
+    expect(process.exitCode).toBe(1)
+    errorSpy.mockRestore()
+  })
+
+  it('null exit code (signal-killed): maps to exit code 1', async () => {
+    mockInject.mockResolvedValue({ exitCode: null, stdout: '', stderr: '' })
+    await runRequest()
+
+    expect(process.exitCode).toBe(1)
   })
 })
