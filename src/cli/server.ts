@@ -1,4 +1,5 @@
 import { Command } from 'commander'
+import { randomBytes } from 'node:crypto'
 import { fork } from 'node:child_process'
 import http from 'node:http'
 import { resolve, dirname } from 'node:path'
@@ -168,5 +169,16 @@ server
       )
     }
   })
+
+const token = new Command('token').description('Manage server authentication tokens')
+
+token
+  .command('generate')
+  .description('Generate a random 32-byte hex token for server authentication')
+  .action(() => {
+    console.log(randomBytes(32).toString('hex'))
+  })
+
+server.addCommand(token)
 
 export { server as serverCommand }
