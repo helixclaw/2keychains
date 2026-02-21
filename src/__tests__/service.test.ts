@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { resolveService, LocalService } from '../core/service.js'
+import { RemoteService } from '../core/remote-service.js'
 import { defaultConfig } from '../core/config.js'
 
 describe('resolveService', () => {
@@ -10,9 +11,14 @@ describe('resolveService', () => {
     expect(service).toBeInstanceOf(LocalService)
   })
 
-  it('throws for client mode', () => {
-    const config = { ...defaultConfig(), mode: 'client' as const }
-    expect(() => resolveService(config)).toThrow('client mode not yet available')
+  it('returns RemoteService for client mode', () => {
+    const config = {
+      ...defaultConfig(),
+      mode: 'client' as const,
+      server: { host: '127.0.0.1', port: 2274, authToken: 'test-token' },
+    }
+    const service = resolveService(config)
+    expect(service).toBeInstanceOf(RemoteService)
   })
 })
 

@@ -1,6 +1,7 @@
 import type { AppConfig } from './config.js'
 import type { SecretListItem, SecretMetadata, ProcessResult } from './types.js'
 import type { AccessRequest } from './request.js'
+import { RemoteService } from './remote-service.js'
 
 // SecretSummary aliases existing SecretListItem shape
 export type SecretSummary = SecretListItem
@@ -75,7 +76,7 @@ export class LocalService implements Service {
 
 export function resolveService(config: AppConfig): Service {
   if (config.mode === 'client') {
-    throw new Error('client mode not yet available')
+    return new RemoteService(config.server)
   }
   return new LocalService()
 }
