@@ -11,7 +11,7 @@ describe('HTTP Server', () => {
 
   describe('GET /health', () => {
     it('returns 200 with status ok and uptime', async () => {
-      const server = createServer(config)
+      const server = createServer()
       const response = await server.inject({ method: 'GET', url: '/health' })
 
       expect(response.statusCode).toBe(200)
@@ -25,7 +25,7 @@ describe('HTTP Server', () => {
 
   describe('404 handling', () => {
     it('returns 404 JSON for unknown routes', async () => {
-      const server = createServer(config)
+      const server = createServer()
       const response = await server.inject({ method: 'GET', url: '/nonexistent' })
 
       expect(response.statusCode).toBe(404)
@@ -39,7 +39,7 @@ describe('HTTP Server', () => {
 
   describe('graceful shutdown', () => {
     it('closes the server without error', async () => {
-      const server = createServer(config)
+      const server = createServer()
       await server.listen({ host: config.server.host, port: config.server.port })
 
       await expect(server.close()).resolves.toBeUndefined()

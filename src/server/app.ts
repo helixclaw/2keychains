@@ -1,7 +1,7 @@
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
 import type { AppConfig } from '../core/config.js'
 
-export function createServer(config: AppConfig): FastifyInstance {
+export function createServer(): FastifyInstance {
   const server = Fastify({
     logger: {
       level: 'info',
@@ -26,7 +26,7 @@ export function createServer(config: AppConfig): FastifyInstance {
 }
 
 export async function startServer(config: AppConfig): Promise<FastifyInstance> {
-  const server = createServer(config)
+  const server = createServer()
 
   await server.listen({ host: config.server.host, port: config.server.port })
 
