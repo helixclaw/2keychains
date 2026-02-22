@@ -1,6 +1,6 @@
 export interface SecretEntry {
   uuid: string
-  name: string
+  ref: string
   value: string
   tags: string[]
   createdAt: string
@@ -9,12 +9,13 @@ export interface SecretEntry {
 
 export interface SecretListItem {
   uuid: string
+  ref: string
   tags: string[]
 }
 
 export interface SecretMetadata {
   uuid: string
-  name: string
+  ref: string
   tags: string[]
 }
 

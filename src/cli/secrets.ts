@@ -46,10 +46,10 @@ const secrets = new Command('secrets').description('Manage secrets in the local 
 secrets
   .command('add')
   .description('Add a new secret')
-  .requiredOption('--name <name>', 'Human-readable name')
+  .requiredOption('--ref <ref>', 'Human-readable ref (URL-safe slug)')
   .option('--value <value>', 'Secret value (reads from stdin if omitted)')
   .option('--tags <tags...>', 'Tags for approval config')
-  .action(async (opts: { name: string; value?: string; tags?: string[] }) => {
+  .action(async (opts: { ref: string; value?: string; tags?: string[] }) => {
     const value = await resolveValue(opts.value)
     if (!value) {
       console.error('Error: secret value must not be empty')
@@ -57,13 +57,13 @@ secrets
       return
     }
     const service = resolveService(loadConfig())
-    const result = await service.secrets.add(opts.name, value, opts.tags)
+    const result = await service.secrets.add(opts.ref, value, opts.tags)
     console.log(result.uuid)
   })
 
 secrets
   .command('list')
-  .description('List all secrets (UUIDs and tags only)')
+  .description('List all secrets (UUIDs, refs, and tags)')
   .action(async () => {
     try {
       const service = resolveService(loadConfig())
@@ -77,12 +77,13 @@ secrets
 
 secrets
   .command('remove')
-  .description('Remove a secret by UUID')
-  .argument('<uuid>', 'UUID of the secret to remove')
-  .action(async (uuid: string) => {
+  .description('Remove a secret by ref or UUID')
+  .argument('<refOrUuid>', 'Ref or UUID of the secret to remove')
+  .action(async (refOrUuid: string) => {
     try {
       const service = resolveService(loadConfig())
-      await service.secrets.remove(uuid)
+      const metadata = await service.secrets.resolve(refOrUuid)
+      await service.secrets.remove(metadata.uuid)
       console.log('Removed')
     } catch (err: unknown) {
       console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)

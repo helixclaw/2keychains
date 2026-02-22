@@ -77,7 +77,7 @@ describe('RemoteService', () => {
       )
     })
 
-    it('add() calls POST /api/secrets with name, value, tags', async () => {
+    it('add() calls POST /api/secrets with ref, value, tags', async () => {
       const fetchMock = mockFetchResponse(200, { uuid: 'new-uuid' })
       globalThis.fetch = fetchMock
 
@@ -89,7 +89,7 @@ describe('RemoteService', () => {
         'http://127.0.0.1:2274/api/secrets',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ name: 'my-secret', value: 's3cret', tags: ['tag1'] }),
+          body: JSON.stringify({ ref: 'my-secret', value: 's3cret', tags: ['tag1'] }),
         }),
       )
     })
@@ -108,7 +108,7 @@ describe('RemoteService', () => {
     })
 
     it('getMetadata() calls GET /api/secrets/:uuid', async () => {
-      const metadata = { uuid: 'x', name: 'n', tags: [] }
+      const metadata = { uuid: 'x', ref: 'n', tags: [] }
       const fetchMock = mockFetchResponse(200, metadata)
       globalThis.fetch = fetchMock
 

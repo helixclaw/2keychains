@@ -2,7 +2,8 @@
 
 import { WorkflowEngine } from '../core/workflow.js'
 import type { NotificationChannel } from '../channels/channel.js'
-import type { SecretStore, SecretMetadata } from '../core/secret-store.js'
+import type { SecretStore } from '../core/secret-store.js'
+import type { SecretMetadata } from '../core/types.js'
 import type { AccessRequest } from '../core/request.js'
 import type { AppConfig } from '../core/config.js'
 
@@ -59,7 +60,7 @@ describe('WorkflowEngine', () => {
     it('sends approval request and returns approved when channel approves', async () => {
       const store = createSingleMockStore({
         uuid: 'secret-uuid-1',
-        name: 'db-password',
+        ref: 'db-password',
         tags: ['production'],
       })
       const channel = createMockChannel('approved')
@@ -83,7 +84,7 @@ describe('WorkflowEngine', () => {
     it('sends approval request and returns denied when channel denies', async () => {
       const store = createSingleMockStore({
         uuid: 'secret-uuid-1',
-        name: 'db-password',
+        ref: 'db-password',
         tags: ['production'],
       })
       const channel = createMockChannel('denied')
@@ -100,7 +101,7 @@ describe('WorkflowEngine', () => {
     it('sends approval request and returns timeout when channel times out', async () => {
       const store = createSingleMockStore({
         uuid: 'secret-uuid-1',
-        name: 'db-password',
+        ref: 'db-password',
         tags: ['production'],
       })
       const channel = createMockChannel('timeout')
@@ -116,7 +117,7 @@ describe('WorkflowEngine', () => {
     it('auto-approves when no tags match requireApproval', async () => {
       const store = createSingleMockStore({
         uuid: 'secret-uuid-1',
-        name: 'dev-key',
+        ref: 'dev-key',
         tags: ['dev'],
       })
       const channel = createMockChannel()
@@ -137,7 +138,7 @@ describe('WorkflowEngine', () => {
     it('auto-approves untagged secret when defaultRequireApproval is false', async () => {
       const store = createSingleMockStore({
         uuid: 'secret-uuid-1',
-        name: 'misc-secret',
+        ref: 'misc-secret',
         tags: [],
       })
       const channel = createMockChannel()
@@ -158,7 +159,7 @@ describe('WorkflowEngine', () => {
     it('requires approval for untagged secret when defaultRequireApproval is true', async () => {
       const store = createSingleMockStore({
         uuid: 'secret-uuid-1',
-        name: 'misc-secret',
+        ref: 'misc-secret',
         tags: [],
       })
       const channel = createMockChannel('approved')
@@ -190,7 +191,7 @@ describe('WorkflowEngine', () => {
     it('throws when channel send fails and sets status to denied', async () => {
       const store = createSingleMockStore({
         uuid: 'secret-uuid-1',
-        name: 'db-password',
+        ref: 'db-password',
         tags: ['production'],
       })
       const channel: NotificationChannel = {
@@ -207,7 +208,7 @@ describe('WorkflowEngine', () => {
     it('skips approval when tag explicitly set to false even if default is true', async () => {
       const store = createSingleMockStore({
         uuid: 'secret-uuid-1',
-        name: 'dev-key',
+        ref: 'dev-key',
         tags: ['dev'],
       })
       const channel = createMockChannel()
@@ -232,8 +233,8 @@ describe('WorkflowEngine', () => {
   describe('processRequest - batch', () => {
     it('fetches metadata for all secretUuids', async () => {
       const store = createMockStore({
-        'uuid-1': { uuid: 'uuid-1', name: 'secret-a', tags: ['dev'] },
-        'uuid-2': { uuid: 'uuid-2', name: 'secret-b', tags: ['dev'] },
+        'uuid-1': { uuid: 'uuid-1', ref: 'secret-a', tags: ['dev'] },
+        'uuid-2': { uuid: 'uuid-2', ref: 'secret-b', tags: ['dev'] },
       })
       const channel = createMockChannel()
       const engine = new WorkflowEngine({
@@ -290,8 +291,8 @@ describe('WorkflowEngine', () => {
 
     it('channel request includes all secret names and UUIDs', async () => {
       const store = createMockStore({
-        'uuid-1': { uuid: 'uuid-1', name: 'secret-a', tags: ['production'] },
-        'uuid-2': { uuid: 'uuid-2', name: 'secret-b', tags: ['production'] },
+        'uuid-1': { uuid: 'uuid-1', ref: 'secret-a', tags: ['production'] },
+        'uuid-2': { uuid: 'uuid-2', ref: 'secret-b', tags: ['production'] },
       })
       const channel = createMockChannel('approved')
       const engine = new WorkflowEngine({

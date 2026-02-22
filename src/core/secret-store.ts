@@ -7,6 +7,9 @@ import type { SecretEntry, SecretListItem, SecretMetadata, SecretsFile } from '.
 
 const DEFAULT_PATH = join(homedir(), '.2kc', 'secrets.json')
 
+const REF_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export class SecretStore {
   private readonly filePath: string
 
@@ -36,6 +39,26 @@ export class SecretStore {
     return entry
   }
 
+  private findByRef(ref: string): SecretEntry {
+    const secrets = this.load()
+    const entry = secrets.find((s) => s.ref === ref)
+    if (!entry) {
+      throw new Error(`Secret with ref "${ref}" not found`)
+    }
+    return entry
+  }
+
+  private validateRef(ref: string): void {
+    if (!REF_PATTERN.test(ref)) {
+      throw new Error(
+        `Invalid ref "${ref}". Must be a lowercase alphanumeric slug (a-z, 0-9, hyphens) with no leading or trailing hyphens.`,
+      )
+    }
+    if (UUID_PATTERN.test(ref)) {
+      throw new Error(`Invalid ref "${ref}". Refs must not look like UUIDs.`)
+    }
+  }
+
   private save(secrets: SecretEntry[]): void {
     const dir = dirname(this.filePath)
     mkdirSync(dir, { recursive: true })
@@ -44,17 +67,18 @@ export class SecretStore {
     chmodSync(this.filePath, 0o600)
   }
 
-  add(name: string, value: string, tags: string[] = []): string {
+  add(ref: string, value: string, tags: string[] = []): string {
+    this.validateRef(ref)
     const secrets = this.load()
-    const existing = secrets.find((s) => s.name === name)
+    const existing = secrets.find((s) => s.ref === ref)
     if (existing) {
-      throw new Error(`A secret with the name "${name}" already exists`)
+      throw new Error(`A secret with the ref "${ref}" already exists`)
     }
     const uuid = uuidv4()
     const now = new Date().toISOString()
     const entry: SecretEntry = {
       uuid,
-      name,
+      ref,
       value,
       tags,
       createdAt: now,
@@ -75,16 +99,33 @@ export class SecretStore {
 
   list(): SecretListItem[] {
     const secrets = this.load()
-    return secrets.map((s) => ({ uuid: s.uuid, tags: s.tags }))
+    return secrets.map((s) => ({ uuid: s.uuid, ref: s.ref, tags: s.tags }))
   }
 
   getMetadata(uuid: string): SecretMetadata {
     const entry = this.findEntry(uuid)
-    return { uuid: entry.uuid, name: entry.name, tags: entry.tags }
+    return { uuid: entry.uuid, ref: entry.ref, tags: entry.tags }
   }
 
   getValue(uuid: string): string {
     const entry = this.findEntry(uuid)
     return entry.value
+  }
+
+  getByRef(ref: string): SecretMetadata {
+    const entry = this.findByRef(ref)
+    return { uuid: entry.uuid, ref: entry.ref, tags: entry.tags }
+  }
+
+  getValueByRef(ref: string): string {
+    const entry = this.findByRef(ref)
+    return entry.value
+  }
+
+  resolve(refOrUuid: string): SecretMetadata {
+    if (UUID_PATTERN.test(refOrUuid)) {
+      return this.getMetadata(refOrUuid)
+    }
+    return this.getByRef(refOrUuid)
   }
 }

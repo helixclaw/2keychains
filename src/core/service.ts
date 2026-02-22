@@ -11,9 +11,10 @@ export interface Service {
 
   secrets: {
     list(): Promise<SecretSummary[]>
-    add(name: string, value: string, tags?: string[]): Promise<{ uuid: string }>
+    add(ref: string, value: string, tags?: string[]): Promise<{ uuid: string }>
     remove(uuid: string): Promise<void>
     getMetadata(uuid: string): Promise<SecretMetadata>
+    resolve(refOrUuid: string): Promise<SecretMetadata>
   }
 
   requests: {
@@ -52,6 +53,9 @@ export class LocalService implements Service {
       notImplemented()
     },
     async getMetadata() {
+      notImplemented()
+    },
+    async resolve() {
       notImplemented()
     },
   }

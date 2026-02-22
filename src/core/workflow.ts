@@ -35,7 +35,7 @@ function toChannelRequest(
     requester: 'agent',
     justification: request.reason,
     durationMs: request.durationSeconds * 1000,
-    secretNames: metadataList.map((m) => m.name),
+    secretNames: metadataList.map((m) => m.ref),
   }
 }
 
