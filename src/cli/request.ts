@@ -4,8 +4,8 @@ import { loadConfig } from '../core/config.js'
 import { resolveService } from '../core/service.js'
 
 const request = new Command('request')
-  .description('Request access to a secret and inject into a command')
-  .argument('<uuid>', 'UUID of the secret to access')
+  .description('Request access to one or more secrets and inject into a command')
+  .argument('<uuid...>', 'UUIDs of the secrets to access')
   .requiredOption('--reason <reason>', 'Justification for access')
   .requiredOption('--task <taskRef>', 'Task reference (e.g., ticket ID)')
   .option('--duration <seconds>', 'Grant duration in seconds', '300')
@@ -13,7 +13,7 @@ const request = new Command('request')
   .requiredOption('--cmd <command>', 'Command to run with secret injected')
   .action(
     async (
-      uuid: string,
+      uuids: string[],
       opts: {
         reason: string
         task: string
@@ -37,7 +37,7 @@ const request = new Command('request')
 
         // 3. Create access request via service
         const accessRequest = await service.requests.create(
-          uuid,
+          uuids,
           opts.reason,
           opts.task,
           durationSeconds,
@@ -46,7 +46,7 @@ const request = new Command('request')
         // 4. Validate grant
         const isValid = await service.grants.validate(accessRequest.id)
         if (!isValid) {
-          console.error(`Access request denied: ${uuid}`)
+          console.error(`Access request denied: ${uuids.join(', ')}`)
           process.exitCode = 1
           return
         }
@@ -64,9 +64,9 @@ const request = new Command('request')
         const message = err instanceof Error ? err.message : String(err)
 
         if (message.includes('not found')) {
-          console.error(`Secret UUID not found: ${uuid}`)
+          console.error(`Secret UUID not found: ${uuids.join(', ')}`)
         } else if (message.includes('Grant is not valid')) {
-          console.error(`Grant expired: ${uuid}`)
+          console.error(`Grant expired: ${uuids.join(', ')}`)
         } else {
           console.error(`Error: ${message}`)
         }

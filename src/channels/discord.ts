@@ -43,9 +43,9 @@ export class DiscordChannel implements NotificationChannel {
       title: 'Access Request',
       color: 0xffa500,
       fields: [
-        { name: 'UUID', value: request.uuid, inline: true },
+        { name: 'UUIDs', value: request.uuids.join(', '), inline: true },
         { name: 'Requester', value: request.requester, inline: true },
-        { name: 'Secret', value: request.secretName, inline: true },
+        { name: 'Secrets', value: request.secretNames.join(', '), inline: true },
         { name: 'Justification', value: request.justification },
         {
           name: 'Duration',

@@ -9,11 +9,11 @@ const TEST_CONFIG = {
 }
 
 const TEST_REQUEST: AccessRequest = {
-  uuid: 'req-001',
+  uuids: ['req-001'],
   requester: 'alice',
   justification: 'Need access for deployment',
   durationMs: 3600000,
-  secretName: 'prod-db-password',
+  secretNames: ['prod-db-password'],
 }
 
 describe('DiscordChannel', () => {
@@ -57,10 +57,10 @@ describe('DiscordChannel', () => {
       const fields = body.embeds[0].fields
       expect(fields).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ name: 'UUID', value: 'req-001' }),
+          expect.objectContaining({ name: 'UUIDs', value: 'req-001' }),
           expect.objectContaining({ name: 'Requester', value: 'alice' }),
           expect.objectContaining({
-            name: 'Secret',
+            name: 'Secrets',
             value: 'prod-db-password',
           }),
           expect.objectContaining({

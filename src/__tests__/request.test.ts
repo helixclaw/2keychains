@@ -4,18 +4,18 @@ import { createAccessRequest, RequestLog, type AccessRequest } from '../core/req
 
 describe('createAccessRequest', () => {
   const validArgs = {
-    secretUuid: '550e8400-e29b-41d4-a716-446655440000',
+    secretUuids: ['550e8400-e29b-41d4-a716-446655440000'],
     reason: 'Need DB credentials for migration',
     taskRef: 'JIRA-1234',
   }
 
   describe('happy path', () => {
     it('creates a request with default duration', () => {
-      const req = createAccessRequest(validArgs.secretUuid, validArgs.reason, validArgs.taskRef)
+      const req = createAccessRequest(validArgs.secretUuids, validArgs.reason, validArgs.taskRef)
 
       expect(req.id).toBeDefined()
       expect(req.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
-      expect(req.secretUuid).toBe(validArgs.secretUuid)
+      expect(req.secretUuids).toEqual(validArgs.secretUuids)
       expect(req.reason).toBe(validArgs.reason)
       expect(req.taskRef).toBe(validArgs.taskRef)
       expect(req.durationSeconds).toBe(300)
@@ -26,7 +26,7 @@ describe('createAccessRequest', () => {
 
     it('creates a request with custom duration', () => {
       const req = createAccessRequest(
-        validArgs.secretUuid,
+        validArgs.secretUuids,
         validArgs.reason,
         validArgs.taskRef,
         600,
@@ -36,14 +36,19 @@ describe('createAccessRequest', () => {
     })
 
     it('accepts minimum duration of 30 seconds', () => {
-      const req = createAccessRequest(validArgs.secretUuid, validArgs.reason, validArgs.taskRef, 30)
+      const req = createAccessRequest(
+        validArgs.secretUuids,
+        validArgs.reason,
+        validArgs.taskRef,
+        30,
+      )
 
       expect(req.durationSeconds).toBe(30)
     })
 
     it('accepts maximum duration of 3600 seconds', () => {
       const req = createAccessRequest(
-        validArgs.secretUuid,
+        validArgs.secretUuids,
         validArgs.reason,
         validArgs.taskRef,
         3600,
@@ -53,36 +58,52 @@ describe('createAccessRequest', () => {
     })
 
     it('generates unique ids for each request', () => {
-      const req1 = createAccessRequest(validArgs.secretUuid, validArgs.reason, validArgs.taskRef)
-      const req2 = createAccessRequest(validArgs.secretUuid, validArgs.reason, validArgs.taskRef)
+      const req1 = createAccessRequest(validArgs.secretUuids, validArgs.reason, validArgs.taskRef)
+      const req2 = createAccessRequest(validArgs.secretUuids, validArgs.reason, validArgs.taskRef)
 
       expect(req1.id).not.toBe(req2.id)
     })
   })
 
-  describe('validation - secretUuid', () => {
-    it('rejects empty secretUuid', () => {
-      expect(() => createAccessRequest('', validArgs.reason, validArgs.taskRef)).toThrow(
-        'secretUuid is required and must not be empty',
+  describe('validation - secretUuids', () => {
+    it('rejects empty secretUuids array', () => {
+      expect(() => createAccessRequest([], validArgs.reason, validArgs.taskRef)).toThrow(
+        'secretUuids must be a non-empty array',
       )
     })
 
-    it('rejects whitespace-only secretUuid', () => {
-      expect(() => createAccessRequest('   ', validArgs.reason, validArgs.taskRef)).toThrow(
-        'secretUuid is required and must not be empty',
+    it('rejects non-array secretUuids', () => {
+      expect(() =>
+        createAccessRequest(
+          'not-an-array' as unknown as string[],
+          validArgs.reason,
+          validArgs.taskRef,
+        ),
+      ).toThrow('secretUuids must be a non-empty array')
+    })
+
+    it('rejects array with empty string element', () => {
+      expect(() => createAccessRequest([''], validArgs.reason, validArgs.taskRef)).toThrow(
+        'Each secretUuid must be a non-empty string',
+      )
+    })
+
+    it('rejects array with whitespace-only element', () => {
+      expect(() => createAccessRequest(['   '], validArgs.reason, validArgs.taskRef)).toThrow(
+        'Each secretUuid must be a non-empty string',
       )
     })
   })
 
   describe('validation - reason', () => {
     it('rejects empty reason', () => {
-      expect(() => createAccessRequest(validArgs.secretUuid, '', validArgs.taskRef)).toThrow(
+      expect(() => createAccessRequest(validArgs.secretUuids, '', validArgs.taskRef)).toThrow(
         'reason is required and must not be empty',
       )
     })
 
     it('rejects whitespace-only reason', () => {
-      expect(() => createAccessRequest(validArgs.secretUuid, '   ', validArgs.taskRef)).toThrow(
+      expect(() => createAccessRequest(validArgs.secretUuids, '   ', validArgs.taskRef)).toThrow(
         'reason is required and must not be empty',
       )
     })
@@ -90,13 +111,13 @@ describe('createAccessRequest', () => {
 
   describe('validation - taskRef', () => {
     it('rejects empty taskRef', () => {
-      expect(() => createAccessRequest(validArgs.secretUuid, validArgs.reason, '')).toThrow(
+      expect(() => createAccessRequest(validArgs.secretUuids, validArgs.reason, '')).toThrow(
         'taskRef is required and must not be empty',
       )
     })
 
     it('rejects whitespace-only taskRef', () => {
-      expect(() => createAccessRequest(validArgs.secretUuid, validArgs.reason, '   ')).toThrow(
+      expect(() => createAccessRequest(validArgs.secretUuids, validArgs.reason, '   ')).toThrow(
         'taskRef is required and must not be empty',
       )
     })
@@ -105,26 +126,54 @@ describe('createAccessRequest', () => {
   describe('validation - durationSeconds', () => {
     it('rejects duration below 30 seconds', () => {
       expect(() =>
-        createAccessRequest(validArgs.secretUuid, validArgs.reason, validArgs.taskRef, 29),
+        createAccessRequest(validArgs.secretUuids, validArgs.reason, validArgs.taskRef, 29),
       ).toThrow('durationSeconds must be at least 30')
     })
 
     it('rejects duration above 3600 seconds', () => {
       expect(() =>
-        createAccessRequest(validArgs.secretUuid, validArgs.reason, validArgs.taskRef, 3601),
+        createAccessRequest(validArgs.secretUuids, validArgs.reason, validArgs.taskRef, 3601),
       ).toThrow('durationSeconds must be at most 3600')
     })
 
     it('rejects zero duration', () => {
       expect(() =>
-        createAccessRequest(validArgs.secretUuid, validArgs.reason, validArgs.taskRef, 0),
+        createAccessRequest(validArgs.secretUuids, validArgs.reason, validArgs.taskRef, 0),
       ).toThrow('durationSeconds must be at least 30')
     })
 
     it('rejects negative duration', () => {
       expect(() =>
-        createAccessRequest(validArgs.secretUuid, validArgs.reason, validArgs.taskRef, -1),
+        createAccessRequest(validArgs.secretUuids, validArgs.reason, validArgs.taskRef, -1),
       ).toThrow('durationSeconds must be at least 30')
+    })
+  })
+
+  describe('batch', () => {
+    it('creates request with multiple secretUuids', () => {
+      const req = createAccessRequest(
+        ['uuid-1', 'uuid-2', 'uuid-3'],
+        validArgs.reason,
+        validArgs.taskRef,
+      )
+
+      expect(req.secretUuids).toEqual(['uuid-1', 'uuid-2', 'uuid-3'])
+    })
+
+    it('deduplicates secretUuids', () => {
+      const req = createAccessRequest(
+        ['uuid-1', 'uuid-2', 'uuid-1'],
+        validArgs.reason,
+        validArgs.taskRef,
+      )
+
+      expect(req.secretUuids).toEqual(['uuid-1', 'uuid-2'])
+    })
+
+    it('works with single-element array (backwards compat)', () => {
+      const req = createAccessRequest(['single-uuid'], validArgs.reason, validArgs.taskRef)
+
+      expect(req.secretUuids).toEqual(['single-uuid'])
     })
   })
 })
@@ -139,7 +188,7 @@ describe('RequestLog', () => {
 
   it('adds and retrieves requests', () => {
     const log = new RequestLog()
-    const req = createAccessRequest('secret-1', 'need it', 'TASK-1')
+    const req = createAccessRequest(['secret-1'], 'need it', 'TASK-1')
 
     log.add(req)
 
@@ -149,9 +198,9 @@ describe('RequestLog', () => {
 
   it('retrieves requests by secretUuid', () => {
     const log = new RequestLog()
-    const req1 = createAccessRequest('secret-1', 'reason', 'TASK-1')
-    const req2 = createAccessRequest('secret-2', 'reason', 'TASK-2')
-    const req3 = createAccessRequest('secret-1', 'another reason', 'TASK-3')
+    const req1 = createAccessRequest(['secret-1'], 'reason', 'TASK-1')
+    const req2 = createAccessRequest(['secret-2'], 'reason', 'TASK-2')
+    const req3 = createAccessRequest(['secret-1'], 'another reason', 'TASK-3')
 
     log.add(req1)
     log.add(req2)
@@ -163,9 +212,19 @@ describe('RequestLog', () => {
     expect(filtered[1]).toEqual(req3)
   })
 
+  it('getBySecretUuid returns request even if UUID is not first in array', () => {
+    const log = new RequestLog()
+    const req = createAccessRequest(['secret-a', 'secret-b'], 'reason', 'TASK-1')
+    log.add(req)
+
+    const filtered = log.getBySecretUuid('secret-b')
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]).toEqual(req)
+  })
+
   it('retrieves a request by id', () => {
     const log = new RequestLog()
-    const req = createAccessRequest('secret-1', 'reason', 'TASK-1')
+    const req = createAccessRequest(['secret-1'], 'reason', 'TASK-1')
 
     log.add(req)
 
@@ -175,7 +234,7 @@ describe('RequestLog', () => {
 
   it('returns a copy from getAll to prevent external mutation', () => {
     const log = new RequestLog()
-    const req = createAccessRequest('secret-1', 'reason', 'TASK-1')
+    const req = createAccessRequest(['secret-1'], 'reason', 'TASK-1')
     log.add(req)
 
     const all = log.getAll()

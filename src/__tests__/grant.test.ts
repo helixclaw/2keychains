@@ -5,7 +5,7 @@ import { createAccessRequest } from '../core/request.js'
 
 function makeApprovedRequest(durationSeconds = 300) {
   const request = createAccessRequest(
-    '550e8400-e29b-41d4-a716-446655440000',
+    ['550e8400-e29b-41d4-a716-446655440000'],
     'Need DB credentials for migration',
     'JIRA-1234',
     durationSeconds,
@@ -16,7 +16,7 @@ function makeApprovedRequest(durationSeconds = 300) {
 
 function makePendingRequest(durationSeconds = 300) {
   return createAccessRequest(
-    '550e8400-e29b-41d4-a716-446655440000',
+    ['550e8400-e29b-41d4-a716-446655440000'],
     'Need DB credentials for migration',
     'JIRA-1234',
     durationSeconds,
@@ -41,12 +41,12 @@ describe('GrantManager', () => {
       expect(grant.requestId).toBe(request.id)
     })
 
-    it('sets secretUuid from request.secretUuid', () => {
+    it('sets secretUuids from request.secretUuids', () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
       const grant = manager.createGrant(request)
 
-      expect(grant.secretUuid).toBe(request.secretUuid)
+      expect(grant.secretUuids).toEqual(request.secretUuids)
     })
 
     it('sets used to false and revokedAt to null', () => {
@@ -91,6 +91,32 @@ describe('GrantManager', () => {
         const grant = manager.createGrant(request)
 
         expect(grant.expiresAt).toBe('2026-01-15T10:05:00.000Z')
+      })
+    })
+
+    describe('batch', () => {
+      it('copies secretUuids array from request', () => {
+        const manager = new GrantManager()
+        const request = createAccessRequest(
+          ['uuid-1', 'uuid-2', 'uuid-3'],
+          'batch access',
+          'TASK-1',
+        )
+        request.status = 'approved'
+        const grant = manager.createGrant(request)
+
+        expect(grant.secretUuids).toEqual(['uuid-1', 'uuid-2', 'uuid-3'])
+      })
+
+      it('preserves all UUIDs in the array', () => {
+        const manager = new GrantManager()
+        const uuids = ['a', 'b', 'c', 'd', 'e']
+        const request = createAccessRequest(uuids, 'batch access', 'TASK-1')
+        request.status = 'approved'
+        const grant = manager.createGrant(request)
+
+        expect(grant.secretUuids).toHaveLength(5)
+        expect(grant.secretUuids).toEqual(uuids)
       })
     })
   })
@@ -315,6 +341,24 @@ describe('GrantManager', () => {
       const manager = new GrantManager()
 
       expect(manager.getGrant('nonexistent')).toBeUndefined()
+    })
+  })
+
+  describe('getGrantSecrets', () => {
+    it('returns secretUuids array for valid grant', () => {
+      const manager = new GrantManager()
+      const request = createAccessRequest(['uuid-1', 'uuid-2'], 'reason', 'TASK-1')
+      request.status = 'approved'
+      const grant = manager.createGrant(request)
+
+      const secrets = manager.getGrantSecrets(grant.id)
+      expect(secrets).toEqual(['uuid-1', 'uuid-2'])
+    })
+
+    it('returns undefined for non-existent grant', () => {
+      const manager = new GrantManager()
+
+      expect(manager.getGrantSecrets('nonexistent')).toBeUndefined()
     })
   })
 })
