@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import type { GrantManager } from './grant.js'
 import type { SecretStore } from './secret-store.js'
 import type { ProcessResult } from './types.js'
+import { RedactTransform } from './redact.js'
 
 export interface InjectOptions {
   timeoutMs?: number
@@ -62,9 +63,20 @@ export class SecretInjector {
     // 5. Scan and replace 2k:// placeholders
     const finalEnv = this.scanAndReplace(env, grant.secretUuids)
 
+    // 6. Collect all secret values for redaction
+    const secrets = grant.secretUuids
+      .map((uuid) => {
+        try {
+          return this.secretStore.getValue(uuid)
+        } catch {
+          return null
+        }
+      })
+      .filter((v): v is string => v !== null)
+
     try {
-      // 6. Spawn child process with built env
-      return await this.spawnProcess(command, finalEnv, options?.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+      // 7. Spawn child process with built env and redaction
+      return await this.spawnProcess(command, finalEnv, options?.timeoutMs ?? DEFAULT_TIMEOUT_MS, secrets)
     } finally {
       try {
         this.grantManager.markUsed(grantId)
@@ -99,6 +111,7 @@ export class SecretInjector {
     command: string[],
     env: Record<string, string>,
     timeoutMs: number,
+    secrets: string[],
   ): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
       const [cmd, ...args] = command
@@ -106,6 +119,9 @@ export class SecretInjector {
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
+
+      const stdoutRedact = new RedactTransform(secrets)
+      const stderrRedact = new RedactTransform(secrets)
 
       let stdout = ''
       let stderr = ''
@@ -119,23 +135,37 @@ export class SecretInjector {
         child.kill('SIGKILL')
       }, timeoutMs)
 
+      // Pipe child output through redaction transforms.
+      // pipe() handles forwarding data and end events automatically.
+      child.stdout.pipe(stdoutRedact)
+      child.stderr.pipe(stderrRedact)
+
+      // Buffer limit tracks raw (pre-redaction) child output bytes.
+      // Redacted output may differ in size, but we cap based on what
+      // the child actually produces to bound memory usage predictably.
       child.stdout.on('data', (data: Buffer) => {
         stdoutBytes += data.length
         if (stdoutBytes > MAX_BUFFER_BYTES) {
           bufferExceeded = true
+          child.stdout.unpipe(stdoutRedact)
           child.kill('SIGKILL')
-          return
         }
-        stdout += data.toString()
       })
 
       child.stderr.on('data', (data: Buffer) => {
         stderrBytes += data.length
         if (stderrBytes > MAX_BUFFER_BYTES) {
           bufferExceeded = true
+          child.stderr.unpipe(stderrRedact)
           child.kill('SIGKILL')
-          return
         }
+      })
+
+      stdoutRedact.on('data', (data: Buffer | string) => {
+        stdout += data.toString()
+      })
+
+      stderrRedact.on('data', (data: Buffer | string) => {
         stderr += data.toString()
       })
 
@@ -146,15 +176,26 @@ export class SecretInjector {
 
       child.on('close', (exitCode: number | null) => {
         clearTimeout(timer)
-        if (timedOut) {
-          reject(new Error(`Process timed out after ${timeoutMs}ms`))
-          return
-        }
-        if (bufferExceeded) {
-          reject(new Error(`Process killed: output exceeded ${MAX_BUFFER_BYTES} byte buffer limit`))
-          return
-        }
-        resolve({ exitCode, stdout, stderr })
+
+        // Flush any remaining buffered data in the redaction transforms
+        if (!stdoutRedact.writableEnded) stdoutRedact.end()
+        if (!stderrRedact.writableEnded) stderrRedact.end()
+
+        // Wait for both transforms to finish flushing before resolving
+        const waitForFinish = (stream: RedactTransform): Promise<void> =>
+          stream.writableFinished ? Promise.resolve() : new Promise((r) => stream.on('finish', r))
+
+        Promise.all([waitForFinish(stdoutRedact), waitForFinish(stderrRedact)]).then(() => {
+          if (timedOut) {
+            reject(new Error(`Process timed out after ${timeoutMs}ms`))
+          } else if (bufferExceeded) {
+            reject(
+              new Error(`Process killed: output exceeded ${MAX_BUFFER_BYTES} byte buffer limit`),
+            )
+          } else {
+            resolve({ exitCode, stdout, stderr })
+          }
+        })
       })
     })
   }
