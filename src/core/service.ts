@@ -30,7 +30,11 @@ export interface Service {
     validate(requestId: string): Promise<boolean>
   }
 
-  inject(requestId: string, envVarName: string, command: string): Promise<ProcessResult>
+  inject(
+    requestId: string,
+    command: string,
+    options?: { envVarName?: string },
+  ): Promise<ProcessResult>
 }
 
 function notImplemented(): never {
@@ -72,8 +76,14 @@ export class LocalService implements Service {
     },
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async inject(requestId: string, envVarName: string, command: string): Promise<ProcessResult> {
+  async inject(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    requestId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    command: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    options?: { envVarName?: string },
+  ): Promise<ProcessResult> {
     notImplemented()
   }
 }

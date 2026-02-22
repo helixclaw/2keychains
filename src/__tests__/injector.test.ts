@@ -50,6 +50,7 @@ function createMockGrantManager(overrides: Partial<GrantManager> = {}): GrantMan
 function createMockSecretStore(overrides: Partial<SecretStore> = {}): SecretStore {
   return {
     getValue: vi.fn().mockReturnValue('super-secret-value'),
+    resolveRef: vi.fn().mockReturnValue({ uuid: 'secret-uuid-1', value: 'resolved-secret' }),
     ...overrides,
   } as unknown as SecretStore
 }
@@ -68,7 +69,9 @@ describe('SecretInjector', () => {
       const mockChild = createMockChild()
       mockedSpawn.mockReturnValue(mockChild as never)
 
-      const resultPromise = injector.inject('grant-1', 'SECRET_VAR', ['echo', 'hello'])
+      const resultPromise = injector.inject('grant-1', ['echo', 'hello'], {
+        envVarName: 'SECRET_VAR',
+      })
 
       mockChild.stdout.emit('data', Buffer.from('hello\n'))
       mockChild.emit('close', 0)
@@ -90,7 +93,9 @@ describe('SecretInjector', () => {
       const mockChild = createMockChild()
       mockedSpawn.mockReturnValue(mockChild as never)
 
-      const resultPromise = injector.inject('grant-1', 'SECRET_VAR', ['echo', 'hello'])
+      const resultPromise = injector.inject('grant-1', ['echo', 'hello'], {
+        envVarName: 'SECRET_VAR',
+      })
 
       mockChild.stdout.emit('data', Buffer.from('hello\n'))
       mockChild.emit('close', 0)
@@ -105,9 +110,7 @@ describe('SecretInjector', () => {
       const secretStore = createMockSecretStore()
       const injector = new SecretInjector(grantManager, secretStore)
 
-      await expect(injector.inject('grant-1', 'SECRET_VAR', [])).rejects.toThrow(
-        'Command must not be empty',
-      )
+      await expect(injector.inject('grant-1', [])).rejects.toThrow('Command must not be empty')
 
       expect(mockedSpawn).not.toHaveBeenCalled()
       expect(secretStore.getValue).not.toHaveBeenCalled()
@@ -120,9 +123,9 @@ describe('SecretInjector', () => {
       const secretStore = createMockSecretStore()
       const injector = new SecretInjector(grantManager, secretStore)
 
-      await expect(injector.inject('bad-grant', 'SECRET_VAR', ['echo', 'hello'])).rejects.toThrow(
-        'Grant is not valid: bad-grant',
-      )
+      await expect(
+        injector.inject('bad-grant', ['echo', 'hello'], { envVarName: 'SECRET_VAR' }),
+      ).rejects.toThrow('Grant is not valid: bad-grant')
 
       expect(mockedSpawn).not.toHaveBeenCalled()
       expect(secretStore.getValue).not.toHaveBeenCalled()
@@ -138,9 +141,9 @@ describe('SecretInjector', () => {
       const secretStore = createMockSecretStore()
       const injector = new SecretInjector(grantManager, secretStore)
 
-      await expect(injector.inject('grant-1', 'SECRET_VAR', ['echo', 'hello'])).rejects.toThrow(
-        'Grant is not valid: grant-1',
-      )
+      await expect(
+        injector.inject('grant-1', ['echo', 'hello'], { envVarName: 'SECRET_VAR' }),
+      ).rejects.toThrow('Grant is not valid: grant-1')
 
       expect(mockedSpawn).not.toHaveBeenCalled()
 
@@ -155,7 +158,7 @@ describe('SecretInjector', () => {
       const mockChild = createMockChild()
       mockedSpawn.mockReturnValue(mockChild as never)
 
-      const resultPromise = injector.inject('grant-1', 'SECRET_VAR', ['false'])
+      const resultPromise = injector.inject('grant-1', ['false'], { envVarName: 'SECRET_VAR' })
 
       mockChild.stderr.emit('data', Buffer.from('error occurred\n'))
       mockChild.emit('close', 1)
@@ -173,7 +176,9 @@ describe('SecretInjector', () => {
       const mockChild = createMockChild()
       mockedSpawn.mockReturnValue(mockChild as never)
 
-      const resultPromise = injector.inject('grant-1', 'SECRET_VAR', ['nonexistent-command'])
+      const resultPromise = injector.inject('grant-1', ['nonexistent-command'], {
+        envVarName: 'SECRET_VAR',
+      })
 
       mockChild.emit('error', new Error('spawn nonexistent-command ENOENT'))
 
@@ -193,7 +198,8 @@ describe('SecretInjector', () => {
       const mockChild = createMockChild()
       mockedSpawn.mockReturnValue(mockChild as never)
 
-      const resultPromise = injector.inject('grant-1', 'SECRET_VAR', ['sleep', '999'], {
+      const resultPromise = injector.inject('grant-1', ['sleep', '999'], {
+        envVarName: 'SECRET_VAR',
         timeoutMs: 5000,
       })
 
@@ -221,7 +227,7 @@ describe('SecretInjector', () => {
       const mockChild = createMockChild()
       mockedSpawn.mockReturnValue(mockChild as never)
 
-      const resultPromise = injector.inject('grant-1', 'SECRET_VAR', ['false'])
+      const resultPromise = injector.inject('grant-1', ['false'], { envVarName: 'SECRET_VAR' })
 
       mockChild.emit('close', 1)
 
@@ -242,7 +248,7 @@ describe('SecretInjector', () => {
       const mockChild = createMockChild()
       mockedSpawn.mockReturnValue(mockChild as never)
 
-      const resultPromise = injector.inject('grant-1', 'SECRET_VAR', ['fail-cmd'])
+      const resultPromise = injector.inject('grant-1', ['fail-cmd'], { envVarName: 'SECRET_VAR' })
 
       mockChild.emit('error', new Error('spawn fail-cmd ENOENT'))
 
@@ -263,7 +269,9 @@ describe('SecretInjector', () => {
         return true
       })
 
-      const resultPromise = injector.inject('grant-1', 'SECRET_VAR', ['big-output'])
+      const resultPromise = injector.inject('grant-1', ['big-output'], {
+        envVarName: 'SECRET_VAR',
+      })
 
       // Emit a chunk that exceeds the buffer limit
       const oversizedChunk = Buffer.alloc(MAX_BUFFER_BYTES + 1, 'x')
@@ -289,7 +297,9 @@ describe('SecretInjector', () => {
         return true
       })
 
-      const resultPromise = injector.inject('grant-1', 'SECRET_VAR', ['big-errors'])
+      const resultPromise = injector.inject('grant-1', ['big-errors'], {
+        envVarName: 'SECRET_VAR',
+      })
 
       const oversizedChunk = Buffer.alloc(MAX_BUFFER_BYTES + 1, 'x')
       mockChild.stderr.emit('data', oversizedChunk)
@@ -309,7 +319,7 @@ describe('SecretInjector', () => {
       const mockChild = createMockChild()
       mockedSpawn.mockReturnValue(mockChild as never)
 
-      const resultPromise = injector.inject('grant-1', 'SECRET_VAR', ['my-cmd'])
+      const resultPromise = injector.inject('grant-1', ['my-cmd'], { envVarName: 'SECRET_VAR' })
 
       mockChild.stdout.emit('data', Buffer.from('out1'))
       mockChild.stdout.emit('data', Buffer.from('out2'))
@@ -320,6 +330,349 @@ describe('SecretInjector', () => {
 
       expect(result.stdout).toBe('out1out2')
       expect(result.stderr).toBe('err1')
+    })
+  })
+
+  describe('scanAndReplace (via inject)', () => {
+    it('replaces 2k://name placeholder with secret value', async () => {
+      const grantManager = createMockGrantManager()
+      const secretStore = createMockSecretStore({
+        getValue: vi.fn().mockReturnValue('super-secret-value'),
+        resolveRef: vi.fn().mockReturnValue({ uuid: 'secret-uuid-1', value: 'real-api-key' }),
+      })
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      const mockChild = createMockChild()
+      mockedSpawn.mockReturnValue(mockChild as never)
+
+      // Set a placeholder in process.env
+      const origEnv = process.env['TEST_API_KEY']
+      process.env['TEST_API_KEY'] = '2k://my-api-key'
+
+      try {
+        const resultPromise = injector.inject('grant-1', ['echo', 'hello'])
+
+        mockChild.emit('close', 0)
+        await resultPromise
+
+        expect(secretStore.resolveRef).toHaveBeenCalledWith('my-api-key')
+        expect(mockedSpawn).toHaveBeenCalledWith('echo', ['hello'], {
+          env: expect.objectContaining({ TEST_API_KEY: 'real-api-key' }),
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      } finally {
+        if (origEnv === undefined) {
+          delete process.env['TEST_API_KEY']
+        } else {
+          process.env['TEST_API_KEY'] = origEnv
+        }
+      }
+    })
+
+    it('replaces 2k://uuid placeholder with secret value', async () => {
+      const uuid = '550e8400-e29b-41d4-a716-446655440000'
+      const grantManager = createMockGrantManager({
+        getGrant: vi.fn().mockReturnValue({
+          id: 'grant-1',
+          requestId: 'req-1',
+          secretUuids: [uuid],
+          grantedAt: '2026-01-15T10:00:00.000Z',
+          expiresAt: '2026-01-15T10:05:00.000Z',
+          used: false,
+          revokedAt: null,
+        }),
+      })
+      const secretStore = createMockSecretStore({
+        getValue: vi.fn().mockReturnValue('super-secret-value'),
+        resolveRef: vi.fn().mockReturnValue({ uuid, value: 'db-password-123' }),
+      })
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      const mockChild = createMockChild()
+      mockedSpawn.mockReturnValue(mockChild as never)
+
+      const origEnv = process.env['DB_PASS']
+      process.env['DB_PASS'] = `2k://${uuid}`
+
+      try {
+        const resultPromise = injector.inject('grant-1', ['echo', 'hello'])
+
+        mockChild.emit('close', 0)
+        await resultPromise
+
+        expect(secretStore.resolveRef).toHaveBeenCalledWith(uuid)
+        expect(mockedSpawn).toHaveBeenCalledWith('echo', ['hello'], {
+          env: expect.objectContaining({ DB_PASS: 'db-password-123' }),
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      } finally {
+        if (origEnv === undefined) {
+          delete process.env['DB_PASS']
+        } else {
+          process.env['DB_PASS'] = origEnv
+        }
+      }
+    })
+
+    it('leaves non-placeholder env vars unchanged', async () => {
+      const grantManager = createMockGrantManager()
+      const secretStore = createMockSecretStore({
+        getValue: vi.fn().mockReturnValue('super-secret-value'),
+        resolveRef: vi.fn().mockReturnValue({ uuid: 'secret-uuid-1', value: 'resolved' }),
+      })
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      const mockChild = createMockChild()
+      mockedSpawn.mockReturnValue(mockChild as never)
+
+      const origPath = process.env['PATH']
+      const origKey = process.env['TEST_SCAN_KEY']
+      process.env['TEST_SCAN_KEY'] = '2k://my-key'
+
+      try {
+        const resultPromise = injector.inject('grant-1', ['echo', 'hello'])
+
+        mockChild.emit('close', 0)
+        await resultPromise
+
+        // PATH should be preserved as-is
+        expect(mockedSpawn).toHaveBeenCalledWith('echo', ['hello'], {
+          env: expect.objectContaining({ PATH: origPath, TEST_SCAN_KEY: 'resolved' }),
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      } finally {
+        if (origKey === undefined) {
+          delete process.env['TEST_SCAN_KEY']
+        } else {
+          process.env['TEST_SCAN_KEY'] = origKey
+        }
+      }
+    })
+
+    it('replaces multiple placeholders across different env vars', async () => {
+      const grantManager = createMockGrantManager({
+        getGrant: vi.fn().mockReturnValue({
+          id: 'grant-1',
+          requestId: 'req-1',
+          secretUuids: ['uuid-a', 'uuid-b'],
+          grantedAt: '2026-01-15T10:00:00.000Z',
+          expiresAt: '2026-01-15T10:05:00.000Z',
+          used: false,
+          revokedAt: null,
+        }),
+      })
+      const secretStore = createMockSecretStore({
+        getValue: vi.fn().mockReturnValue('super-secret-value'),
+        resolveRef: vi.fn().mockImplementation((ref: string) => {
+          if (ref === 'ref-a') return { uuid: 'uuid-a', value: 'value-a' }
+          if (ref === 'ref-b') return { uuid: 'uuid-b', value: 'value-b' }
+          throw new Error(`Unknown ref: ${ref}`)
+        }),
+      })
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      const mockChild = createMockChild()
+      mockedSpawn.mockReturnValue(mockChild as never)
+
+      const origA = process.env['TEST_A']
+      const origB = process.env['TEST_B']
+      const origC = process.env['TEST_C']
+      process.env['TEST_A'] = '2k://ref-a'
+      process.env['TEST_B'] = '2k://ref-b'
+      process.env['TEST_C'] = 'normal-value'
+
+      try {
+        const resultPromise = injector.inject('grant-1', ['echo', 'hello'])
+
+        mockChild.emit('close', 0)
+        await resultPromise
+
+        expect(mockedSpawn).toHaveBeenCalledWith('echo', ['hello'], {
+          env: expect.objectContaining({
+            TEST_A: 'value-a',
+            TEST_B: 'value-b',
+            TEST_C: 'normal-value',
+          }),
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      } finally {
+        if (origA === undefined) delete process.env['TEST_A']
+        else process.env['TEST_A'] = origA
+        if (origB === undefined) delete process.env['TEST_B']
+        else process.env['TEST_B'] = origB
+        if (origC === undefined) delete process.env['TEST_C']
+        else process.env['TEST_C'] = origC
+      }
+    })
+
+    it('throws if placeholder references secret not in grant scope', async () => {
+      const grantManager = createMockGrantManager()
+      const secretStore = createMockSecretStore({
+        getValue: vi.fn().mockReturnValue('super-secret-value'),
+        resolveRef: vi.fn().mockReturnValue({ uuid: 'out-of-scope-uuid', value: 'some-value' }),
+      })
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      const origEnv = process.env['TEST_OOS']
+      process.env['TEST_OOS'] = '2k://out-of-scope'
+
+      try {
+        await expect(injector.inject('grant-1', ['echo', 'hello'])).rejects.toThrow(
+          'Placeholder 2k://out-of-scope in TEST_OOS references secret out-of-scope-uuid which is not covered by the grant',
+        )
+      } finally {
+        if (origEnv === undefined) {
+          delete process.env['TEST_OOS']
+        } else {
+          process.env['TEST_OOS'] = origEnv
+        }
+      }
+    })
+
+    it('throws if placeholder ref cannot be resolved', async () => {
+      const grantManager = createMockGrantManager()
+      const secretStore = createMockSecretStore({
+        getValue: vi.fn().mockReturnValue('super-secret-value'),
+        resolveRef: vi.fn().mockImplementation(() => {
+          throw new Error('Secret with ref "nonexistent" not found')
+        }),
+      })
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      const origEnv = process.env['TEST_NE']
+      process.env['TEST_NE'] = '2k://nonexistent'
+
+      try {
+        await expect(injector.inject('grant-1', ['echo', 'hello'])).rejects.toThrow(
+          'Secret with ref "nonexistent" not found',
+        )
+      } finally {
+        if (origEnv === undefined) {
+          delete process.env['TEST_NE']
+        } else {
+          process.env['TEST_NE'] = origEnv
+        }
+      }
+    })
+
+    it('does not match partial 2k:// in substring', async () => {
+      const grantManager = createMockGrantManager()
+      const secretStore = createMockSecretStore()
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      const mockChild = createMockChild()
+      mockedSpawn.mockReturnValue(mockChild as never)
+
+      const origEnv = process.env['TEST_URL']
+      process.env['TEST_URL'] = 'https://2k://something/path'
+
+      try {
+        const resultPromise = injector.inject('grant-1', ['echo', 'hello'])
+
+        mockChild.emit('close', 0)
+        await resultPromise
+
+        // resolveRef should NOT have been called since it's not a full-value match
+        expect(secretStore.resolveRef).not.toHaveBeenCalled()
+        expect(mockedSpawn).toHaveBeenCalledWith('echo', ['hello'], {
+          env: expect.objectContaining({ TEST_URL: 'https://2k://something/path' }),
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      } finally {
+        if (origEnv === undefined) {
+          delete process.env['TEST_URL']
+        } else {
+          process.env['TEST_URL'] = origEnv
+        }
+      }
+    })
+  })
+
+  describe('inject with placeholder scanning', () => {
+    it('scans env and replaces placeholders when no envVarName given', async () => {
+      const grantManager = createMockGrantManager()
+      const secretStore = createMockSecretStore({
+        getValue: vi.fn().mockReturnValue('super-secret-value'),
+        resolveRef: vi.fn().mockReturnValue({ uuid: 'secret-uuid-1', value: 'scanned-secret' }),
+      })
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      const mockChild = createMockChild()
+      mockedSpawn.mockReturnValue(mockChild as never)
+
+      const origEnv = process.env['TEST_SCAN_ONLY']
+      process.env['TEST_SCAN_ONLY'] = '2k://my-secret'
+
+      try {
+        const resultPromise = injector.inject('grant-1', ['echo', 'hello'])
+
+        mockChild.emit('close', 0)
+        await resultPromise
+
+        // No explicit envVarName, so getValue should not be called for explicit injection
+        expect(secretStore.resolveRef).toHaveBeenCalledWith('my-secret')
+        expect(mockedSpawn).toHaveBeenCalledWith('echo', ['hello'], {
+          env: expect.objectContaining({ TEST_SCAN_ONLY: 'scanned-secret' }),
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      } finally {
+        if (origEnv === undefined) {
+          delete process.env['TEST_SCAN_ONLY']
+        } else {
+          process.env['TEST_SCAN_ONLY'] = origEnv
+        }
+      }
+    })
+
+    it('mixed mode: explicit envVarName + placeholder scanning', async () => {
+      const grantManager = createMockGrantManager({
+        getGrant: vi.fn().mockReturnValue({
+          id: 'grant-1',
+          requestId: 'req-1',
+          secretUuids: ['secret-uuid-1', 'secret-uuid-2'],
+          grantedAt: '2026-01-15T10:00:00.000Z',
+          expiresAt: '2026-01-15T10:05:00.000Z',
+          used: false,
+          revokedAt: null,
+        }),
+      })
+      const secretStore = createMockSecretStore({
+        getValue: vi.fn().mockReturnValue('explicit-secret-value'),
+        resolveRef: vi
+          .fn()
+          .mockReturnValue({ uuid: 'secret-uuid-2', value: 'placeholder-secret-value' }),
+      })
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      const mockChild = createMockChild()
+      mockedSpawn.mockReturnValue(mockChild as never)
+
+      const origEnv = process.env['TEST_PLACEHOLDER']
+      process.env['TEST_PLACEHOLDER'] = '2k://other-secret'
+
+      try {
+        const resultPromise = injector.inject('grant-1', ['echo', 'hello'], {
+          envVarName: 'EXPLICIT_VAR',
+        })
+
+        mockChild.emit('close', 0)
+        await resultPromise
+
+        // Both explicit and placeholder should be in the env
+        expect(mockedSpawn).toHaveBeenCalledWith('echo', ['hello'], {
+          env: expect.objectContaining({
+            EXPLICIT_VAR: 'explicit-secret-value',
+            TEST_PLACEHOLDER: 'placeholder-secret-value',
+          }),
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      } finally {
+        if (origEnv === undefined) {
+          delete process.env['TEST_PLACEHOLDER']
+        } else {
+          process.env['TEST_PLACEHOLDER'] = origEnv
+        }
+      }
     })
   })
 })

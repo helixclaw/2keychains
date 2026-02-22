@@ -128,4 +128,15 @@ export class SecretStore {
     }
     return this.getByRef(refOrUuid)
   }
+
+  resolveRef(refOrUuid: string): { uuid: string; value: string } {
+    const secrets = this.load()
+    if (UUID_PATTERN.test(refOrUuid)) {
+      const entry = secrets.find((s) => s.uuid === refOrUuid)
+      if (entry) return { uuid: entry.uuid, value: entry.value }
+    }
+    const byRef = secrets.find((s) => s.ref === refOrUuid)
+    if (byRef) return { uuid: byRef.uuid, value: byRef.value }
+    throw new Error(`Secret with ref "${refOrUuid}" not found`)
+  }
 }

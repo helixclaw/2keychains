@@ -62,6 +62,8 @@ describe('LocalService', () => {
 
   it('inject throws not implemented', async () => {
     const service = new LocalService()
-    await expect(service.inject('grantId', 'VAR', 'cmd')).rejects.toThrow('not implemented')
+    await expect(service.inject('grantId', 'cmd', { envVarName: 'VAR' })).rejects.toThrow(
+      'not implemented',
+    )
   })
 })

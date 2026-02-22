@@ -173,13 +173,13 @@ describe('RemoteService', () => {
   })
 
   describe('inject', () => {
-    it('calls POST /api/inject with body', async () => {
+    it('calls POST /api/inject with envVarName when provided', async () => {
       const processResult = { exitCode: 0, stdout: 'ok', stderr: '' }
       const fetchMock = mockFetchResponse(200, processResult)
       globalThis.fetch = fetchMock
 
       const service = new RemoteService(makeConfig())
-      const result = await service.inject('req-1', 'SECRET_VAR', 'echo hello')
+      const result = await service.inject('req-1', 'echo hello', { envVarName: 'SECRET_VAR' })
 
       expect(result).toEqual(processResult)
       expect(fetchMock).toHaveBeenCalledWith(
@@ -188,7 +188,28 @@ describe('RemoteService', () => {
           method: 'POST',
           body: JSON.stringify({
             requestId: 'req-1',
+            command: 'echo hello',
             envVarName: 'SECRET_VAR',
+          }),
+        }),
+      )
+    })
+
+    it('calls POST /api/inject without envVarName when not provided', async () => {
+      const processResult = { exitCode: 0, stdout: 'ok', stderr: '' }
+      const fetchMock = mockFetchResponse(200, processResult)
+      globalThis.fetch = fetchMock
+
+      const service = new RemoteService(makeConfig())
+      const result = await service.inject('req-1', 'echo hello')
+
+      expect(result).toEqual(processResult)
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:2274/api/inject',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            requestId: 'req-1',
             command: 'echo hello',
           }),
         }),
