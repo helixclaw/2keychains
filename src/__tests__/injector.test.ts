@@ -1,6 +1,7 @@
 /// <reference types="vitest/globals" />
 
 import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
 import { spawn } from 'node:child_process'
 import { SecretInjector, MAX_BUFFER_BYTES } from '../core/injector.js'
 import type { GrantManager } from '../core/grant.js'
@@ -13,15 +14,15 @@ vi.mock('node:child_process', () => ({
 const mockedSpawn = vi.mocked(spawn)
 
 interface MockChildProcess extends EventEmitter {
-  stdout: EventEmitter
-  stderr: EventEmitter
+  stdout: PassThrough
+  stderr: PassThrough
   kill: ReturnType<typeof vi.fn>
 }
 
 function createMockChild(): MockChildProcess {
   const child = new EventEmitter() as MockChildProcess
-  child.stdout = new EventEmitter()
-  child.stderr = new EventEmitter()
+  child.stdout = new PassThrough()
+  child.stderr = new PassThrough()
   child.kill = vi.fn()
   return child
 }
@@ -330,6 +331,65 @@ describe('SecretInjector', () => {
 
       expect(result.stdout).toBe('out1out2')
       expect(result.stderr).toBe('err1')
+    })
+
+    it('redacts secret value from stdout', async () => {
+      const grantManager = createMockGrantManager()
+      const secretStore = createMockSecretStore()
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      const mockChild = createMockChild()
+      mockedSpawn.mockReturnValue(mockChild as never)
+
+      const resultPromise = injector.inject('grant-1', 'SECRET_VAR', ['leaky-cmd'])
+
+      mockChild.stdout.emit('data', Buffer.from('token is super-secret-value ok'))
+      mockChild.emit('close', 0)
+
+      const result = await resultPromise
+
+      expect(result.stdout).toBe('token is [REDACTED] ok')
+      expect(result.stdout).not.toContain('super-secret-value')
+    })
+
+    it('redacts secret value from stderr', async () => {
+      const grantManager = createMockGrantManager()
+      const secretStore = createMockSecretStore()
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      const mockChild = createMockChild()
+      mockedSpawn.mockReturnValue(mockChild as never)
+
+      const resultPromise = injector.inject('grant-1', 'SECRET_VAR', ['leaky-cmd'])
+
+      mockChild.stderr.emit('data', Buffer.from('error: super-secret-value leaked'))
+      mockChild.emit('close', 1)
+
+      const result = await resultPromise
+
+      expect(result.stderr).toBe('error: [REDACTED] leaked')
+      expect(result.stderr).not.toContain('super-secret-value')
+    })
+
+    it('redacts secret spanning multiple stdout chunks', async () => {
+      const grantManager = createMockGrantManager()
+      const secretStore = createMockSecretStore()
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      const mockChild = createMockChild()
+      mockedSpawn.mockReturnValue(mockChild as never)
+
+      const resultPromise = injector.inject('grant-1', 'SECRET_VAR', ['leaky-cmd'])
+
+      // Split "super-secret-value" across two chunks
+      mockChild.stdout.emit('data', Buffer.from('begin super-sec'))
+      mockChild.stdout.emit('data', Buffer.from('ret-value end'))
+      mockChild.emit('close', 0)
+
+      const result = await resultPromise
+
+      expect(result.stdout).toBe('begin [REDACTED] end')
+      expect(result.stdout).not.toContain('super-secret-value')
     })
   })
 
