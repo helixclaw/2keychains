@@ -77,12 +77,14 @@ export class RemoteService implements Service {
 
   secrets: Service['secrets'] = {
     list: () => this.request<SecretSummary[]>('GET', '/api/secrets'),
-    add: (name: string, value: string, tags?: string[]) =>
-      this.request<{ uuid: string }>('POST', '/api/secrets', { name, value, tags }),
+    add: (ref: string, value: string, tags?: string[]) =>
+      this.request<{ uuid: string }>('POST', '/api/secrets', { ref, value, tags }),
     remove: (uuid: string) =>
       this.request<void>('DELETE', `/api/secrets/${encodeURIComponent(uuid)}`),
     getMetadata: (uuid: string) =>
       this.request<SecretMetadata>('GET', `/api/secrets/${encodeURIComponent(uuid)}`),
+    resolve: (refOrUuid: string) =>
+      this.request<SecretMetadata>('GET', `/api/secrets/resolve/${encodeURIComponent(refOrUuid)}`),
   }
 
   requests: Service['requests'] = {
