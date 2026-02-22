@@ -32,7 +32,7 @@ function createMockGrantManager(overrides: Partial<GrantManager> = {}): GrantMan
     getGrant: vi.fn().mockReturnValue({
       id: 'grant-1',
       requestId: 'req-1',
-      secretUuid: 'secret-uuid-1',
+      secretUuids: ['secret-uuid-1'],
       grantedAt: '2026-01-15T10:00:00.000Z',
       expiresAt: '2026-01-15T10:05:00.000Z',
       used: false,
@@ -42,6 +42,7 @@ function createMockGrantManager(overrides: Partial<GrantManager> = {}): GrantMan
     createGrant: vi.fn(),
     revokeGrant: vi.fn(),
     cleanup: vi.fn(),
+    getGrantSecrets: vi.fn().mockReturnValue(['secret-uuid-1']),
     ...overrides,
   } as unknown as GrantManager
 }

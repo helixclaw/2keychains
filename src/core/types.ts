@@ -27,11 +27,11 @@ export interface SecretsFile {
  * The canonical model is in request.ts -- the WorkflowEngine bridges the two.
  */
 export interface AccessRequest {
-  uuid: string
+  uuids: string[]
   requester: string
   justification: string
   durationMs: number
-  secretName: string
+  secretNames: string[]
 }
 
 export interface ProcessResult {

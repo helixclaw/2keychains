@@ -4,7 +4,7 @@ import type { AccessRequest } from './request.js'
 export interface AccessGrant {
   id: string
   requestId: string
-  secretUuid: string
+  secretUuids: string[]
   grantedAt: string
   expiresAt: string
   used: boolean
@@ -22,7 +22,7 @@ export class GrantManager {
     const grant: AccessGrant = {
       id: randomUUID(),
       requestId: request.id,
-      secretUuid: request.secretUuid,
+      secretUuids: request.secretUuids,
       grantedAt: new Date(now).toISOString(),
       expiresAt: new Date(now + request.durationSeconds * 1000).toISOString(),
       used: false,
@@ -77,5 +77,11 @@ export class GrantManager {
     const grant = this.grants.get(grantId)
     if (!grant) return undefined
     return { ...grant }
+  }
+
+  getGrantSecrets(grantId: string): string[] | undefined {
+    const grant = this.grants.get(grantId)
+    if (!grant) return undefined
+    return [...grant.secretUuids]
   }
 }

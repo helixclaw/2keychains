@@ -24,15 +24,18 @@ function needsApproval(
   return config.defaultRequireApproval
 }
 
-function toChannelRequest(request: AccessRequest, metadata: SecretMetadata): ChannelAccessRequest {
+function toChannelRequest(
+  request: AccessRequest,
+  metadataList: SecretMetadata[],
+): ChannelAccessRequest {
   return {
-    uuid: request.secretUuid,
+    uuids: request.secretUuids,
     // In the current single-agent design, all secret access requests originate
     // from the AI agent, so 'agent' is always the correct requester identity.
     requester: 'agent',
     justification: request.reason,
     durationMs: request.durationSeconds * 1000,
-    secretName: metadata.name,
+    secretNames: metadataList.map((m) => m.name),
   }
 }
 
@@ -49,14 +52,20 @@ export class WorkflowEngine {
 
   async processRequest(request: AccessRequest): Promise<'approved' | 'denied' | 'timeout'> {
     try {
-      const metadata = await this.store.getMetadata(request.secretUuid)
+      const metadataList = await Promise.all(
+        request.secretUuids.map((uuid) => this.store.getMetadata(uuid)),
+      )
 
-      if (!needsApproval(metadata.tags, this.config)) {
+      const requiresApproval = metadataList.some((metadata) =>
+        needsApproval(metadata.tags, this.config),
+      )
+
+      if (!requiresApproval) {
         request.status = 'approved'
         return 'approved'
       }
 
-      const channelRequest = toChannelRequest(request, metadata)
+      const channelRequest = toChannelRequest(request, metadataList)
       const messageId = await this.channel.sendApprovalRequest(channelRequest)
       const result = await this.channel.waitForResponse(messageId, this.config.approvalTimeoutMs)
 

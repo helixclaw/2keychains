@@ -4,7 +4,7 @@ export type AccessRequestStatus = 'pending' | 'approved' | 'denied' | 'expired' 
 
 export interface AccessRequest {
   id: string
-  secretUuid: string
+  secretUuids: string[]
   reason: string
   taskRef: string
   durationSeconds: number
@@ -17,14 +17,20 @@ const MAX_DURATION_SECONDS = 3600
 const DEFAULT_DURATION_SECONDS = 300
 
 export function createAccessRequest(
-  secretUuid: string,
+  secretUuids: string[],
   reason: string,
   taskRef: string,
   durationSeconds: number = DEFAULT_DURATION_SECONDS,
 ): AccessRequest {
-  if (!secretUuid || secretUuid.trim().length === 0) {
-    throw new Error('secretUuid is required and must not be empty')
+  if (!Array.isArray(secretUuids) || secretUuids.length === 0) {
+    throw new Error('secretUuids must be a non-empty array')
   }
+  for (const uuid of secretUuids) {
+    if (!uuid || uuid.trim().length === 0) {
+      throw new Error('Each secretUuid must be a non-empty string')
+    }
+  }
+  const uniqueUuids = [...new Set(secretUuids)]
 
   if (!reason || reason.trim().length === 0) {
     throw new Error('reason is required and must not be empty')
@@ -48,7 +54,7 @@ export function createAccessRequest(
 
   return {
     id: randomUUID(),
-    secretUuid,
+    secretUuids: uniqueUuids,
     reason,
     taskRef,
     durationSeconds,
@@ -69,7 +75,7 @@ export class RequestLog {
   }
 
   getBySecretUuid(secretUuid: string): ReadonlyArray<AccessRequest> {
-    return this.requests.filter((r) => r.secretUuid === secretUuid)
+    return this.requests.filter((r) => r.secretUuids.includes(secretUuid))
   }
 
   getById(id: string): AccessRequest | undefined {

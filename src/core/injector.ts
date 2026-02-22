@@ -31,21 +31,30 @@ export class SecretInjector {
       throw new Error(`Grant is not valid: ${grantId}`)
     }
 
-    // 2. Get grant to retrieve secretUuid
+    // 2. Get grant to retrieve secretUuids
     const grant = this.grantManager.getGrant(grantId)
     if (!grant) {
       throw new Error(`Grant not found: ${grantId}`)
     }
 
-    // 3. Fetch secret value
-    let secretValue: string | null = this.secretStore.getValue(grant.secretUuid)
+    // 3. Fetch secret value (batch injection is a separate issue; use first UUID)
+    if (grant.secretUuids.length > 1) {
+      console.warn(
+        'Warning: Grant covers multiple secrets but only the first will be injected. Batch injection is not yet supported.',
+      )
+    }
+    let secretValue: string | null = this.secretStore.getValue(grant.secretUuids[0])
+
+    if (secretValue === null) {
+      throw new Error(`Secret value not found for UUID: ${grant.secretUuids[0]}`)
+    }
 
     try {
       // 4. Spawn child process with secret in env
       return await this.spawnProcess(
         command,
         envVarName,
-        secretValue!,
+        secretValue,
         options?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       )
     } finally {

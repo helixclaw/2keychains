@@ -61,7 +61,7 @@ function createTestConfig(): AppConfig {
 function createTestAccessRequest(overrides?: Partial<AccessRequest>): AccessRequest {
   return {
     id: 'test-request-id',
-    secretUuid: 'test-secret-uuid',
+    secretUuids: ['test-secret-uuid'],
     reason: 'need for deploy',
     taskRef: 'TICKET-123',
     durationSeconds: 300,
@@ -114,7 +114,7 @@ describe('request command orchestration', () => {
     expect(mockLoadConfig).toHaveBeenCalled()
     expect(mockResolveService).toHaveBeenCalled()
     expect(mockRequestsCreate).toHaveBeenCalledWith(
-      'test-secret-uuid',
+      ['test-secret-uuid'],
       'need for deploy',
       'TICKET-123',
       300,
@@ -174,7 +174,7 @@ describe('request command orchestration', () => {
     ])
 
     expect(mockRequestsCreate).toHaveBeenCalledWith(
-      'test-secret-uuid',
+      ['test-secret-uuid'],
       'need for deploy',
       'TICKET-123',
       600,
@@ -186,7 +186,7 @@ describe('request command orchestration', () => {
     await runRequest()
 
     expect(mockRequestsCreate).toHaveBeenCalledWith(
-      'test-secret-uuid',
+      ['test-secret-uuid'],
       'need for deploy',
       'TICKET-123',
       300,
@@ -240,5 +240,43 @@ describe('request command orchestration', () => {
     await runRequest()
 
     expect(process.exitCode).toBe(1)
+  })
+
+  describe('batch', () => {
+    it('passes multiple UUIDs to service.requests.create', async () => {
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+      await runRequest([
+        'uuid-1',
+        'uuid-2',
+        'uuid-3',
+        '--reason',
+        'need for deploy',
+        '--task',
+        'TICKET-123',
+        '--env',
+        'MY_SECRET',
+        '--cmd',
+        'echo hello',
+      ])
+
+      expect(mockRequestsCreate).toHaveBeenCalledWith(
+        ['uuid-1', 'uuid-2', 'uuid-3'],
+        'need for deploy',
+        'TICKET-123',
+        300,
+      )
+    })
+
+    it('works with single UUID (backwards compat)', async () => {
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+      await runRequest()
+
+      expect(mockRequestsCreate).toHaveBeenCalledWith(
+        ['test-secret-uuid'],
+        'need for deploy',
+        'TICKET-123',
+        300,
+      )
+    })
   })
 })

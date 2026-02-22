@@ -18,7 +18,7 @@ export interface Service {
 
   requests: {
     create(
-      secretUuid: string,
+      secretUuids: string[],
       reason: string,
       taskRef: string,
       duration?: number,

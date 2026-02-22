@@ -127,7 +127,7 @@ describe('RemoteService', () => {
     it('create() calls POST /api/requests with body', async () => {
       const accessRequest = {
         id: 'req-1',
-        secretUuid: 'sec-1',
+        secretUuids: ['sec-1'],
         reason: 'need it',
         taskRef: 'TASK-1',
         durationSeconds: 300,
@@ -138,7 +138,7 @@ describe('RemoteService', () => {
       globalThis.fetch = fetchMock
 
       const service = new RemoteService(makeConfig())
-      const result = await service.requests.create('sec-1', 'need it', 'TASK-1', 300)
+      const result = await service.requests.create(['sec-1'], 'need it', 'TASK-1', 300)
 
       expect(result).toEqual(accessRequest)
       expect(fetchMock).toHaveBeenCalledWith(
@@ -146,7 +146,7 @@ describe('RemoteService', () => {
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({
-            secretUuid: 'sec-1',
+            secretUuids: ['sec-1'],
             reason: 'need it',
             taskRef: 'TASK-1',
             duration: 300,

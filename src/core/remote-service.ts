@@ -86,9 +86,9 @@ export class RemoteService implements Service {
   }
 
   requests: Service['requests'] = {
-    create: (secretUuid: string, reason: string, taskRef: string, duration?: number) =>
+    create: (secretUuids: string[], reason: string, taskRef: string, duration?: number) =>
       this.request<AccessRequest>('POST', '/api/requests', {
-        secretUuid,
+        secretUuids,
         reason,
         taskRef,
         duration,
