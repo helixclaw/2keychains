@@ -120,7 +120,9 @@ describe('request command orchestration', () => {
       300,
     )
     expect(mockGrantsValidate).toHaveBeenCalledWith('test-request-id')
-    expect(mockInject).toHaveBeenCalledWith('test-request-id', 'MY_SECRET', 'echo hello')
+    expect(mockInject).toHaveBeenCalledWith('test-request-id', 'echo hello', {
+      envVarName: 'MY_SECRET',
+    })
     expect(stdoutSpy).toHaveBeenCalledWith('output')
     expect(process.exitCode).toBe(0)
     stdoutSpy.mockRestore()
@@ -240,6 +242,22 @@ describe('request command orchestration', () => {
     await runRequest()
 
     expect(process.exitCode).toBe(1)
+  })
+
+  it('runs without --env flag (placeholder-only mode)', async () => {
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await runRequest([
+      'test-secret-uuid',
+      '--reason',
+      'need for deploy',
+      '--task',
+      'TICKET-123',
+      '--cmd',
+      'echo hello',
+    ])
+
+    expect(mockInject).toHaveBeenCalledWith('test-request-id', 'echo hello', undefined)
+    expect(process.exitCode).toBe(0)
   })
 
   describe('batch', () => {

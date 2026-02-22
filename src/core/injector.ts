@@ -5,10 +5,13 @@ import type { ProcessResult } from './types.js'
 
 export interface InjectOptions {
   timeoutMs?: number
+  envVarName?: string
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
 export const MAX_BUFFER_BYTES = 10 * 1024 * 1024 // 10 MB
+
+const PLACEHOLDER_RE = /^2k:\/\/(.+)$/
 
 export class SecretInjector {
   constructor(
@@ -18,7 +21,6 @@ export class SecretInjector {
 
   async inject(
     grantId: string,
-    envVarName: string,
     command: string[],
     options?: InjectOptions,
   ): Promise<ProcessResult> {
@@ -37,30 +39,33 @@ export class SecretInjector {
       throw new Error(`Grant not found: ${grantId}`)
     }
 
-    // 3. Fetch secret value (batch injection is a separate issue; use first UUID)
-    if (grant.secretUuids.length > 1) {
-      console.warn(
-        'Warning: Grant covers multiple secrets but only the first will be injected. Batch injection is not yet supported.',
-      )
+    // 3. Build env object
+    const env: Record<string, string> = {}
+    for (const [key, val] of Object.entries(process.env)) {
+      if (val !== undefined) {
+        env[key] = val
+      }
     }
-    let secretValue: string | null = this.secretStore.getValue(grant.secretUuids[0])
 
-    if (secretValue === null) {
-      throw new Error(`Secret value not found for UUID: ${grant.secretUuids[0]}`)
+    // 4. If envVarName is provided, inject the first secret explicitly (existing behavior)
+    if (options?.envVarName) {
+      if (grant.secretUuids.length === 0) {
+        throw new Error('Grant has no secret UUIDs')
+      }
+      const secretValue = this.secretStore.getValue(grant.secretUuids[0])
+      if (secretValue === null) {
+        throw new Error(`Secret value not found for UUID: ${grant.secretUuids[0]}`)
+      }
+      env[options.envVarName] = secretValue
     }
+
+    // 5. Scan and replace 2k:// placeholders
+    const finalEnv = this.scanAndReplace(env, grant.secretUuids)
 
     try {
-      // 4. Spawn child process with secret in env
-      return await this.spawnProcess(
-        command,
-        envVarName,
-        secretValue,
-        options?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      )
+      // 6. Spawn child process with built env
+      return await this.spawnProcess(command, finalEnv, options?.timeoutMs ?? DEFAULT_TIMEOUT_MS)
     } finally {
-      // 6. Clear local JS reference only -- does not scrub memory.
-      //    V8 GC handles actual deallocation (see issue scope boundaries).
-      secretValue = null
       try {
         this.grantManager.markUsed(grantId)
       } catch {
@@ -69,16 +74,36 @@ export class SecretInjector {
     }
   }
 
+  private scanAndReplace(
+    env: Record<string, string>,
+    allowedSecretUuids: string[],
+  ): Record<string, string> {
+    const result = { ...env }
+    for (const [key, value] of Object.entries(result)) {
+      const match = PLACEHOLDER_RE.exec(value)
+      if (match) {
+        const ref = match[1]
+        const resolved = this.secretStore.resolveRef(ref)
+        if (!allowedSecretUuids.includes(resolved.uuid)) {
+          throw new Error(
+            `Placeholder 2k://${ref} in ${key} references secret ${resolved.uuid} which is not covered by the grant`,
+          )
+        }
+        result[key] = resolved.value
+      }
+    }
+    return result
+  }
+
   private spawnProcess(
     command: string[],
-    envVarName: string,
-    secretValue: string,
+    env: Record<string, string>,
     timeoutMs: number,
   ): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
       const [cmd, ...args] = command
       const child = spawn(cmd, args, {
-        env: { ...process.env, [envVarName]: secretValue },
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
 

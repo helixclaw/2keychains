@@ -102,11 +102,15 @@ export class RemoteService implements Service {
       this.request<boolean>('GET', `/api/grants/${encodeURIComponent(requestId)}`),
   }
 
-  async inject(requestId: string, envVarName: string, command: string): Promise<ProcessResult> {
+  async inject(
+    requestId: string,
+    command: string,
+    options?: { envVarName?: string },
+  ): Promise<ProcessResult> {
     return this.request<ProcessResult>('POST', '/api/inject', {
       requestId,
-      envVarName,
       command,
+      ...(options?.envVarName != null && { envVarName: options.envVarName }),
     })
   }
 }

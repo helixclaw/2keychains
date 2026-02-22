@@ -9,7 +9,7 @@ const request = new Command('request')
   .requiredOption('--reason <reason>', 'Justification for access')
   .requiredOption('--task <taskRef>', 'Task reference (e.g., ticket ID)')
   .option('--duration <seconds>', 'Grant duration in seconds', '300')
-  .requiredOption('--env <varName>', 'Environment variable name for injection')
+  .option('--env <varName>', 'Environment variable name for injection')
   .requiredOption('--cmd <command>', 'Command to run with secret injected')
   .action(
     async (
@@ -18,7 +18,7 @@ const request = new Command('request')
         reason: string
         task: string
         duration: string
-        env: string
+        env?: string
         cmd: string
       },
     ) => {
@@ -52,7 +52,11 @@ const request = new Command('request')
         }
 
         // 5. Inject secret and run command
-        const processResult = await service.inject(accessRequest.id, opts.env, opts.cmd)
+        const processResult = await service.inject(
+          accessRequest.id,
+          opts.cmd,
+          opts.env ? { envVarName: opts.env } : undefined,
+        )
 
         // 6. Output result
         if (processResult.stdout) process.stdout.write(processResult.stdout)
