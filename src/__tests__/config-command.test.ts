@@ -14,7 +14,7 @@ vi.mock('node:os', () => ({
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { saveConfig, CONFIG_PATH, type AppConfig } from '../core/config.js'
+import { saveConfig, defaultConfig, CONFIG_PATH, type AppConfig } from '../core/config.js'
 
 const mockReadFileSync = vi.mocked(readFileSync)
 const mockWriteFileSync = vi.mocked(writeFileSync)
@@ -223,6 +223,7 @@ describe('config init action', () => {
       mode: 'client',
       server: { host: '10.0.0.1', port: 3000, authToken: 'tok123' },
       store: { path: '/my/store.json' },
+      unlock: defaultConfig().unlock,
       discord: {
         webhookUrl: 'https://discord.com/api/webhooks/999/xyz',
         botToken: 'my-bot-token',

@@ -18,10 +18,17 @@ export interface StoreConfig {
   path: string
 }
 
+export interface UnlockConfig {
+  ttlMs: number
+  idleTtlMs?: number
+  maxGrantsBeforeRelock?: number
+}
+
 export interface AppConfig {
   mode: 'standalone' | 'client'
   server: ServerConfig
   store: StoreConfig
+  unlock: UnlockConfig
   discord?: DiscordConfig
   requireApproval: Record<string, boolean>
   defaultRequireApproval: boolean
@@ -120,11 +127,47 @@ function parseStoreConfig(raw: unknown): StoreConfig {
   return { path: resolveTilde(path) }
 }
 
+function parseUnlockConfig(raw: unknown): UnlockConfig {
+  const defaults: UnlockConfig = { ttlMs: 900_000 }
+  if (raw === undefined || raw === null) return defaults
+  if (!isRecord(raw)) {
+    throw new Error('unlock must be an object')
+  }
+
+  const ttlMs = raw.ttlMs !== undefined ? raw.ttlMs : defaults.ttlMs
+  if (typeof ttlMs !== 'number' || ttlMs <= 0) {
+    throw new Error('unlock.ttlMs must be a positive number')
+  }
+
+  const result: UnlockConfig = { ttlMs }
+
+  if (raw.idleTtlMs !== undefined) {
+    if (typeof raw.idleTtlMs !== 'number' || raw.idleTtlMs <= 0) {
+      throw new Error('unlock.idleTtlMs must be a positive number')
+    }
+    result.idleTtlMs = raw.idleTtlMs
+  }
+
+  if (raw.maxGrantsBeforeRelock !== undefined) {
+    if (
+      typeof raw.maxGrantsBeforeRelock !== 'number' ||
+      !Number.isInteger(raw.maxGrantsBeforeRelock) ||
+      raw.maxGrantsBeforeRelock <= 0
+    ) {
+      throw new Error('unlock.maxGrantsBeforeRelock must be a positive integer')
+    }
+    result.maxGrantsBeforeRelock = raw.maxGrantsBeforeRelock
+  }
+
+  return result
+}
+
 export function defaultConfig(): AppConfig {
   return {
     mode: 'standalone',
     server: { host: '127.0.0.1', port: 2274 },
     store: { path: resolveTilde('~/.2kc/secrets.json') },
+    unlock: { ttlMs: 900_000 },
     discord: undefined,
     requireApproval: {},
     defaultRequireApproval: false,
@@ -147,6 +190,7 @@ export function parseConfig(raw: unknown): AppConfig {
     mode,
     server: parseServerConfig(raw.server),
     store: parseStoreConfig(raw.store),
+    unlock: parseUnlockConfig(raw.unlock),
     discord: parseDiscordConfig(raw.discord),
     requireApproval: parseRequireApproval(raw.requireApproval),
     defaultRequireApproval:
