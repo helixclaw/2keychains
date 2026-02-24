@@ -1,5 +1,8 @@
 # 2keychains
 
+![CI](https://github.com/helixclaw/2keychains/actions/workflows/ci.yml/badge.svg)
+![Coverage](https://img.shields.io/badge/coverage-0%25-red)
+
 A local secret broker for AI agents. Replaces direct secret access with a controlled intermediary featuring human-readable references, approval workflows, placeholder-based injection, and output redaction.
 
 ## Features
@@ -110,6 +113,7 @@ export MY_KEY="2k://my-api-key"
 ```
 
 Options:
+
 - `--reason` (required) — Justification for access
 - `--task` (required) — Task/ticket reference
 - `--env <varName>` — Inject secret into this env var
@@ -155,19 +159,19 @@ Config file: `~/.2kc/config.json`
 
 ### Config Fields
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `mode` | `"standalone"` \| `"client"` | `"standalone"` | Operating mode. Standalone runs locally; client connects to a remote server |
-| `server.host` | string | `"127.0.0.1"` | Server bind address |
-| `server.port` | number | `2274` | Server port |
-| `server.authToken` | string | — | Bearer token for client-server auth |
-| `store.path` | string | `"~/.2kc/secrets.json"` | Path to the secrets JSON file |
-| `discord.webhookUrl` | string | — | Discord webhook URL for approval messages |
-| `discord.botToken` | string | — | Discord bot token for reading reactions |
-| `discord.channelId` | string | — | Discord channel ID for approval polling |
-| `requireApproval` | object | `{}` | Tag → boolean map. Tags set to `true` require human approval |
-| `defaultRequireApproval` | boolean | `false` | Default approval requirement for untagged secrets |
-| `approvalTimeoutMs` | number | `300000` | How long to wait for approval (ms) |
+| Field                    | Type                         | Default                 | Description                                                                 |
+| ------------------------ | ---------------------------- | ----------------------- | --------------------------------------------------------------------------- |
+| `mode`                   | `"standalone"` \| `"client"` | `"standalone"`          | Operating mode. Standalone runs locally; client connects to a remote server |
+| `server.host`            | string                       | `"127.0.0.1"`           | Server bind address                                                         |
+| `server.port`            | number                       | `2274`                  | Server port                                                                 |
+| `server.authToken`       | string                       | —                       | Bearer token for client-server auth                                         |
+| `store.path`             | string                       | `"~/.2kc/secrets.json"` | Path to the secrets JSON file                                               |
+| `discord.webhookUrl`     | string                       | —                       | Discord webhook URL for approval messages                                   |
+| `discord.botToken`       | string                       | —                       | Discord bot token for reading reactions                                     |
+| `discord.channelId`      | string                       | —                       | Discord channel ID for approval polling                                     |
+| `requireApproval`        | object                       | `{}`                    | Tag → boolean map. Tags set to `true` require human approval                |
+| `defaultRequireApproval` | boolean                      | `false`                 | Default approval requirement for untagged secrets                           |
+| `approvalTimeoutMs`      | number                       | `300000`                | How long to wait for approval (ms)                                          |
 
 ## Server Mode
 
@@ -252,12 +256,12 @@ This creates a symlink at `~/.openclaw/workspace/skills/2keychains` pointing to 
 
 2keychains itself doesn't use environment variables for configuration — everything is in `~/.2kc/config.json`. However, the following paths are relevant:
 
-| Path | Description |
-|------|-------------|
-| `~/.2kc/config.json` | Configuration file (0600 permissions) |
-| `~/.2kc/secrets.json` | Secret store (0600 permissions) |
-| `~/.2kc/server.pid` | Server daemon PID file |
-| `~/.2kc/server.log` | Server daemon log file |
+| Path                  | Description                           |
+| --------------------- | ------------------------------------- |
+| `~/.2kc/config.json`  | Configuration file (0600 permissions) |
+| `~/.2kc/secrets.json` | Secret store (0600 permissions)       |
+| `~/.2kc/server.pid`   | Server daemon PID file                |
+| `~/.2kc/server.log`   | Server daemon log file                |
 
 ## Development
 

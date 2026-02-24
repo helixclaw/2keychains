@@ -16,6 +16,10 @@ const TEST_REQUEST: AccessRequest = {
   secretNames: ['prod-db-password'],
 }
 
+function createRequestWithDuration(durationMs: number): AccessRequest {
+  return { ...TEST_REQUEST, durationMs }
+}
+
 describe('DiscordChannel', () => {
   let channel: DiscordChannel
   let fetchMock: ReturnType<typeof vi.fn>
@@ -82,6 +86,51 @@ describe('DiscordChannel', () => {
       await expect(channel.sendApprovalRequest(TEST_REQUEST)).rejects.toThrow(
         'Discord webhook failed: 400 Bad Request',
       )
+    })
+
+    it('should format duration as minutes only when less than an hour', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: '123456' }),
+      })
+
+      await channel.sendApprovalRequest(createRequestWithDuration(300000)) // 5 minutes
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+      const durationField = body.embeds[0].fields.find(
+        (f: { name: string }) => f.name === 'Duration',
+      )
+      expect(durationField.value).toBe('5m')
+    })
+
+    it('should format duration as seconds when less than a minute', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: '123456' }),
+      })
+
+      await channel.sendApprovalRequest(createRequestWithDuration(45000)) // 45 seconds
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+      const durationField = body.embeds[0].fields.find(
+        (f: { name: string }) => f.name === 'Duration',
+      )
+      expect(durationField.value).toBe('45s')
+    })
+
+    it('should format duration as hours and minutes when both are present', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: '123456' }),
+      })
+
+      await channel.sendApprovalRequest(createRequestWithDuration(5700000)) // 1h 35m
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+      const durationField = body.embeds[0].fields.find(
+        (f: { name: string }) => f.name === 'Duration',
+      )
+      expect(durationField.value).toBe('1h 35m')
     })
   })
 
