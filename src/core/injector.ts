@@ -76,7 +76,12 @@ export class SecretInjector {
 
     try {
       // 7. Spawn child process with built env and redaction
-      return await this.spawnProcess(command, finalEnv, options?.timeoutMs ?? DEFAULT_TIMEOUT_MS, secrets)
+      return await this.spawnProcess(
+        command,
+        finalEnv,
+        options?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        secrets,
+      )
     } finally {
       try {
         this.grantManager.markUsed(grantId)

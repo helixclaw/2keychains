@@ -1,9 +1,13 @@
 name: CI
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: write
 
 jobs:
   ci:
@@ -18,3 +22,32 @@ jobs:
       - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm run test:coverage
+
+      - name: Update coverage badge
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          if [ ! -f ./coverage/coverage-summary.json ]; then
+            echo "Coverage summary not found, skipping badge update"
+            exit 0
+          fi
+          node -e "
+          const fs = require('fs');
+          try {
+            const summary = JSON.parse(fs.readFileSync('./coverage/coverage-summary.json', 'utf8'));
+            const coverage = Math.round(summary.total.lines.pct);
+            if (!Number.isFinite(coverage) || coverage < 0 || coverage > 100) {
+              throw new Error('Invalid coverage value: ' + coverage);
+            }
+            const color = coverage >= 80 ? 'brightgreen' : coverage >= 60 ? 'yellow' : 'red';
+            let readme = fs.readFileSync('README.md', 'utf8');
+            readme = readme.replace(/coverage-[0-9]+%25-[a-z]+/g, \\\`coverage-\\\${coverage}%25-\\\${color}\\\`);
+            fs.writeFileSync('README.md', readme);
+            console.log(\\\`Coverage: \\\${coverage}% (\\\${color})\\\`);
+          } catch (err) {
+            console.error('Failed to update coverage badge:', err.message);
+            process.exit(1);
+          }
+          "
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git diff --quiet README.md || (git add README.md && git commit -m "chore: update coverage badge" && git push)
