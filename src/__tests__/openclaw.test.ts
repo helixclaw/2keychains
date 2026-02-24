@@ -13,6 +13,19 @@ import { tmpdir } from 'node:os'
 
 import { installSkill, uninstallSkill } from '../core/openclaw.js'
 
+describe('openclaw default paths', () => {
+  it('installSkill uses default workspace when no options provided (expects error)', () => {
+    // This tests that defaultWorkspaceDir() is called when no opts provided
+    // The error message will include the default path
+    expect(() => installSkill()).toThrow('OpenClaw workspace not found')
+  })
+
+  it('uninstallSkill uses default workspace when no options provided (expects error)', () => {
+    // This tests that defaultWorkspaceDir() is called when no opts provided
+    expect(() => uninstallSkill()).toThrow('OpenClaw workspace not found')
+  })
+})
+
 describe('openclaw install/uninstall', () => {
   let tmpDir: string
   let workspaceDir: string

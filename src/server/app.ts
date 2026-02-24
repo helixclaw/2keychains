@@ -28,21 +28,22 @@ export function createServer(): FastifyInstance {
 export async function startServer(config: AppConfig): Promise<FastifyInstance> {
   const server = createServer()
 
-  await server.listen({ host: config.server.host, port: config.server.port })
-
   const shutdown = async () => {
     server.log.info('Shutting down server...')
     await server.close()
     process.exit(0)
   }
 
-  process.once('SIGINT', shutdown)
-  process.once('SIGTERM', shutdown)
-
+  // Register hooks before listen() since Fastify doesn't allow adding hooks after listening
   server.addHook('onClose', async () => {
     process.removeListener('SIGINT', shutdown)
     process.removeListener('SIGTERM', shutdown)
   })
+
+  await server.listen({ host: config.server.host, port: config.server.port })
+
+  process.once('SIGINT', shutdown)
+  process.once('SIGTERM', shutdown)
 
   return server
 }

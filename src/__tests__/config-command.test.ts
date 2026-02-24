@@ -70,7 +70,15 @@ describe('saveConfig', () => {
 })
 
 describe('config init action', () => {
+  let savedExitCode: number | undefined
+
+  beforeEach(() => {
+    savedExitCode = process.exitCode
+    process.exitCode = undefined
+  })
+
   afterEach(() => {
+    process.exitCode = savedExitCode
     vi.restoreAllMocks()
   })
 
@@ -225,6 +233,90 @@ describe('config init action', () => {
       approvalTimeoutMs: 60_000,
     })
   })
+
+  it('rejects invalid --mode value', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { configCommand } = await import('../cli/config.js')
+    await configCommand.parseAsync(['init', '--mode', 'invalid-mode'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid --mode: must be "standalone" or "client"'),
+    )
+    expect(process.exitCode).toBe(1)
+    expect(mockWriteFileSync).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+
+  it('rejects non-numeric --server-port', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { configCommand } = await import('../cli/config.js')
+    await configCommand.parseAsync(['init', '--server-port', 'abc'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid --server-port: must be an integer between 1 and 65535'),
+    )
+    expect(process.exitCode).toBe(1)
+    expect(mockWriteFileSync).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+
+  it('rejects --server-port out of range (too high)', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { configCommand } = await import('../cli/config.js')
+    await configCommand.parseAsync(['init', '--server-port', '70000'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid --server-port: must be an integer between 1 and 65535'),
+    )
+    expect(process.exitCode).toBe(1)
+    expect(mockWriteFileSync).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+
+  it('rejects --server-port out of range (zero)', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { configCommand } = await import('../cli/config.js')
+    await configCommand.parseAsync(['init', '--server-port', '0'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid --server-port: must be an integer between 1 and 65535'),
+    )
+    expect(process.exitCode).toBe(1)
+    expect(mockWriteFileSync).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+
+  it('rejects invalid --approval-timeout', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { configCommand } = await import('../cli/config.js')
+    await configCommand.parseAsync(['init', '--approval-timeout', 'not-a-number'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid --approval-timeout: must be a positive integer'),
+    )
+    expect(process.exitCode).toBe(1)
+    expect(mockWriteFileSync).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+
+  it('rejects zero --approval-timeout', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { configCommand } = await import('../cli/config.js')
+    await configCommand.parseAsync(['init', '--approval-timeout', '0'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid --approval-timeout: must be a positive integer'),
+    )
+    expect(process.exitCode).toBe(1)
+    expect(mockWriteFileSync).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
 })
 
 describe('config show action', () => {
@@ -330,5 +422,64 @@ describe('config show action', () => {
 
     const output = JSON.parse(logSpy.mock.calls[0][0] as string) as { store: { path: string } }
     expect(output.store).toHaveProperty('path')
+  })
+
+  it('does not truncate short authToken (<=4 chars)', async () => {
+    const config = createValidConfig({
+      server: { host: '127.0.0.1', port: 2274, authToken: 'abc' },
+    })
+    mockReadFileSync.mockReturnValue(JSON.stringify(config))
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const { configCommand } = await import('../cli/config.js')
+    await configCommand.parseAsync(['show'], { from: 'user' })
+
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string) as {
+      server: { authToken: string }
+    }
+    expect(output.server.authToken).toBe('abc')
+    logSpy.mockRestore()
+  })
+
+  it('does not truncate short webhookUrl (<=20 chars)', async () => {
+    const config = createValidConfig({
+      discord: {
+        webhookUrl: 'http://short.url',
+        botToken: 'bot-token-1234567890',
+        channelId: '999888777',
+      },
+    })
+    mockReadFileSync.mockReturnValue(JSON.stringify(config))
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const { configCommand } = await import('../cli/config.js')
+    await configCommand.parseAsync(['show'], { from: 'user' })
+
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string) as {
+      discord: { webhookUrl: string }
+    }
+    expect(output.discord.webhookUrl).toBe('http://short.url')
+    logSpy.mockRestore()
+  })
+
+  it('does not truncate short botToken (<=4 chars)', async () => {
+    const config = createValidConfig({
+      discord: {
+        webhookUrl: 'https://discord.com/api/webhooks/123/abc',
+        botToken: 'tok',
+        channelId: '999888777',
+      },
+    })
+    mockReadFileSync.mockReturnValue(JSON.stringify(config))
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const { configCommand } = await import('../cli/config.js')
+    await configCommand.parseAsync(['show'], { from: 'user' })
+
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string) as {
+      discord: { botToken: string }
+    }
+    expect(output.discord.botToken).toBe('tok')
+    logSpy.mockRestore()
   })
 })
