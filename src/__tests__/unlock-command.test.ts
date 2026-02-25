@@ -166,6 +166,96 @@ describe('unlock command', () => {
 
     errorSpy.mockRestore()
   })
+
+  it('formats TTL in hours when ttlMs >= 3600000', async () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue(JSON.stringify(MOCK_STORE_FILE))
+
+    mockQuestion.mockImplementation((_prompt: string, cb: (answer: string) => void) => {
+      cb('correct-password')
+    })
+
+    const mockDek = Buffer.alloc(32, 0xde)
+    mockDeriveKek.mockResolvedValue(Buffer.alloc(32, 0xab))
+    mockUnwrapDek.mockReturnValue(mockDek)
+    mockLoadConfig.mockReturnValue({
+      ...createTestConfig(),
+      unlock: { ttlMs: 7_200_000 },
+    })
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const { unlockCommand } = await import('../cli/unlock.js')
+    await unlockCommand.parseAsync([], { from: 'user' })
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('2 hours'))
+
+    logSpy.mockRestore()
+  })
+
+  it('formats TTL as "1 hour" (singular) for exactly 3600000ms', async () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue(JSON.stringify(MOCK_STORE_FILE))
+
+    mockQuestion.mockImplementation((_prompt: string, cb: (answer: string) => void) => {
+      cb('correct-password')
+    })
+
+    const mockDek = Buffer.alloc(32, 0xde)
+    mockDeriveKek.mockResolvedValue(Buffer.alloc(32, 0xab))
+    mockUnwrapDek.mockReturnValue(mockDek)
+    mockLoadConfig.mockReturnValue({
+      ...createTestConfig(),
+      unlock: { ttlMs: 3_600_000 },
+    })
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const { unlockCommand } = await import('../cli/unlock.js')
+    await unlockCommand.parseAsync([], { from: 'user' })
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('1 hour'))
+
+    logSpy.mockRestore()
+  })
+
+  it('sets exitCode=1 when store file is malformed (bad version)', async () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue(JSON.stringify({ version: 99, kdf: null, wrappedDek: null }))
+
+    mockQuestion.mockImplementation((_prompt: string, cb: (answer: string) => void) => {
+      cb('password')
+    })
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { unlockCommand } = await import('../cli/unlock.js')
+    await unlockCommand.parseAsync([], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith('Error: Malformed encrypted store file.')
+    expect(process.exitCode).toBe(1)
+
+    errorSpy.mockRestore()
+  })
+
+  it('sets exitCode=1 when store file cannot be read (parse error)', async () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue('not valid json{{{')
+
+    mockQuestion.mockImplementation((_prompt: string, cb: (answer: string) => void) => {
+      cb('password')
+    })
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { unlockCommand } = await import('../cli/unlock.js')
+    await unlockCommand.parseAsync([], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith('Error: Failed to read encrypted store file.')
+    expect(process.exitCode).toBe(1)
+
+    errorSpy.mockRestore()
+  })
 })
 
 describe('lock command', () => {

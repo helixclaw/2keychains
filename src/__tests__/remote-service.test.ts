@@ -107,6 +107,21 @@ describe('RemoteService', () => {
       )
     })
 
+    it('resolve() calls GET /api/secrets/resolve/:refOrUuid', async () => {
+      const metadata = { uuid: 'x', ref: 'my-ref', tags: [] }
+      const fetchMock = mockFetchResponse(200, metadata)
+      globalThis.fetch = fetchMock
+
+      const service = new RemoteService(makeConfig())
+      const result = await service.secrets.resolve('my-ref')
+
+      expect(result).toEqual(metadata)
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:2274/api/secrets/resolve/my-ref',
+        expect.objectContaining({ method: 'GET' }),
+      )
+    })
+
     it('getMetadata() calls GET /api/secrets/:uuid', async () => {
       const metadata = { uuid: 'x', ref: 'n', tags: [] }
       const fetchMock = mockFetchResponse(200, metadata)

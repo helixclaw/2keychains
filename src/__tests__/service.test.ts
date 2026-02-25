@@ -34,6 +34,29 @@ describe('resolveService', () => {
       'Discord must be configured when defaultRequireApproval is true',
     )
   })
+
+  it('creates a noop channel when discord is not configured and approval not required', () => {
+    const config = {
+      ...defaultConfig(),
+      defaultRequireApproval: false,
+      discord: undefined,
+    }
+    const service = resolveService(config)
+    expect(service).toBeInstanceOf(LocalService)
+  })
+
+  it('creates LocalService with discord channel when discord is configured', () => {
+    const config = {
+      ...defaultConfig(),
+      discord: {
+        webhookUrl: 'https://discord.com/api/webhooks/123/abc',
+        botToken: 'bot-token',
+        channelId: '999888777',
+      },
+    }
+    const service = resolveService(config)
+    expect(service).toBeInstanceOf(LocalService)
+  })
 })
 
 function makeGrantMock(overrides?: Partial<AccessGrant>): AccessGrant {
@@ -265,6 +288,35 @@ describe('LocalService', () => {
       await expect(service.inject('missing-request', 'echo hello')).rejects.toThrow(
         'No grant found for request: missing-request',
       )
+    })
+  })
+
+  describe('unlock()', () => {
+    it('unlocks the store and passes DEK to session', async () => {
+      const { service, store, unlockSession } = makeService()
+      ;(store.unlock as MockInstance).mockResolvedValue(undefined)
+      ;(store.getDek as MockInstance).mockReturnValue(Buffer.alloc(32, 0xaa))
+
+      await service.unlock('test-password')
+
+      expect(store.unlock).toHaveBeenCalledWith('test-password')
+      expect(unlockSession.unlock).toHaveBeenCalledWith(Buffer.alloc(32, 0xaa))
+    })
+
+    it('throws when DEK is null after unlock', async () => {
+      const { service, store } = makeService()
+      ;(store.unlock as MockInstance).mockResolvedValue(undefined)
+      ;(store.getDek as MockInstance).mockReturnValue(null)
+
+      await expect(service.unlock('pw')).rejects.toThrow('Failed to obtain DEK after unlock')
+    })
+  })
+
+  describe('lock()', () => {
+    it('locks the session (store locks via event)', () => {
+      const { service, unlockSession } = makeService()
+      service.lock()
+      expect(unlockSession.lock).toHaveBeenCalled()
     })
   })
 

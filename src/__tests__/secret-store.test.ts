@@ -246,6 +246,39 @@ describe('SecretStore', () => {
     })
   })
 
+  describe('resolveRef', () => {
+    it('resolves UUID to uuid + value', () => {
+      const uuid = store.add('rr-test', 'rr-value')
+      const result = store.resolveRef(uuid)
+      expect(result).toEqual({ uuid, value: 'rr-value' })
+    })
+
+    it('resolves ref to uuid + value', () => {
+      const uuid = store.add('rr-by-ref', 'by-ref-val')
+      const result = store.resolveRef('rr-by-ref')
+      expect(result).toEqual({ uuid, value: 'by-ref-val' })
+    })
+
+    it('falls back to ref when UUID not found', () => {
+      const uuid = store.add('fallback-test', 'fb-val')
+      // Pass a UUID that doesn't exist - should fall back to ref search
+      const result = store.resolveRef('fallback-test')
+      expect(result).toEqual({ uuid, value: 'fb-val' })
+    })
+
+    it('throws when neither UUID nor ref found', () => {
+      expect(() => store.resolveRef('nonexistent')).toThrow(
+        'Secret with ref "nonexistent" not found',
+      )
+    })
+
+    it('throws when UUID format given but not found and no ref match', () => {
+      expect(() => store.resolveRef('00000000-0000-0000-0000-000000000000')).toThrow(
+        'Secret with ref "00000000-0000-0000-0000-000000000000" not found',
+      )
+    })
+  })
+
   describe('file handling', () => {
     it('should create the JSON file on first write if it does not exist', () => {
       const newPath = join(tmpDir, 'new-secrets.json')

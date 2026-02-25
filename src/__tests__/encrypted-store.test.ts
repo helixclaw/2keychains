@@ -174,6 +174,62 @@ describe('EncryptedSecretStore', () => {
       expect(store.getByRef('by-ref-test').ref).toBe('by-ref-test')
       expect(store.getValueByRef('by-ref-test')).toBe('ref-value')
     })
+
+    it('getValueByRef throws for non-existent ref', async () => {
+      const store = await createStore()
+      store.add('existing-ref', 'val')
+
+      expect(() => store.getValueByRef('no-such-ref')).toThrow(
+        'Secret with ref "no-such-ref" not found',
+      )
+    })
+  })
+
+  describe('resolveRef', () => {
+    it('resolves by UUID and returns uuid + decrypted value', async () => {
+      const store = await createStore()
+      const uuid = store.add('resolve-ref-test', 'the-value')
+
+      const result = store.resolveRef(uuid)
+      expect(result.uuid).toBe(uuid)
+      expect(result.value).toBe('the-value')
+    })
+
+    it('resolves by ref and returns uuid + decrypted value', async () => {
+      const store = await createStore()
+      const uuid = store.add('resolve-by-name', 'name-value')
+
+      const result = store.resolveRef('resolve-by-name')
+      expect(result.uuid).toBe(uuid)
+      expect(result.value).toBe('name-value')
+    })
+
+    it('falls back to ref lookup when UUID is not found', async () => {
+      const store = await createStore()
+      const uuid = store.add('fallback-ref', 'fb-value')
+
+      // Use a valid UUID format that does not exist in the store
+      // It should fall through UUID lookup and find by ref
+      const result = store.resolveRef('fallback-ref')
+      expect(result.uuid).toBe(uuid)
+      expect(result.value).toBe('fb-value')
+    })
+
+    it('throws when neither UUID nor ref matches', async () => {
+      const store = await createStore()
+
+      expect(() => store.resolveRef('nonexistent')).toThrow(
+        'Secret with ref "nonexistent" not found',
+      )
+    })
+
+    it('throws when locked', async () => {
+      const store = await createStore()
+      store.add('locked-resolve', 'val')
+      store.lock()
+
+      expect(() => store.resolveRef('locked-resolve')).toThrow('Store is locked')
+    })
   })
 
   describe('file format', () => {
