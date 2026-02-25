@@ -1,6 +1,12 @@
 import { Command } from 'commander'
 
-import { loadConfig, saveConfig, CONFIG_PATH, type AppConfig } from '../core/config.js'
+import {
+  loadConfig,
+  saveConfig,
+  defaultConfig,
+  CONFIG_PATH,
+  type AppConfig,
+} from '../core/config.js'
 
 const config = new Command('config').description('Manage 2kc configuration')
 
@@ -60,6 +66,7 @@ config
         store: {
           path: opts.storePath,
         },
+        unlock: defaultConfig().unlock,
         discord:
           opts.webhookUrl && opts.botToken && opts.channelId
             ? {

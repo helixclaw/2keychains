@@ -242,4 +242,51 @@ describe('parseConfig', () => {
       }),
     ).toThrow('discord.botToken must be a non-empty string')
   })
+
+  it('parses unlock config with custom values', () => {
+    const config = parseConfig({
+      unlock: { ttlMs: 30_000, idleTtlMs: 10_000, maxGrantsBeforeRelock: 5 },
+    })
+    expect(config.unlock.ttlMs).toBe(30_000)
+    expect(config.unlock.idleTtlMs).toBe(10_000)
+    expect(config.unlock.maxGrantsBeforeRelock).toBe(5)
+  })
+
+  it('uses defaults for unlock config when missing', () => {
+    const config = parseConfig({})
+    expect(config.unlock.ttlMs).toBe(900_000)
+    expect(config.unlock.idleTtlMs).toBeUndefined()
+    expect(config.unlock.maxGrantsBeforeRelock).toBeUndefined()
+  })
+
+  it('validates unlock.ttlMs is positive number', () => {
+    expect(() => parseConfig({ unlock: { ttlMs: -1 } })).toThrow(
+      'unlock.ttlMs must be a positive number',
+    )
+    expect(() => parseConfig({ unlock: { ttlMs: 0 } })).toThrow(
+      'unlock.ttlMs must be a positive number',
+    )
+    expect(() => parseConfig({ unlock: { ttlMs: 'bad' } })).toThrow(
+      'unlock.ttlMs must be a positive number',
+    )
+  })
+
+  it('validates unlock.idleTtlMs is positive number when provided', () => {
+    expect(() => parseConfig({ unlock: { idleTtlMs: -1 } })).toThrow(
+      'unlock.idleTtlMs must be a positive number',
+    )
+  })
+
+  it('validates unlock.maxGrantsBeforeRelock is positive integer when provided', () => {
+    expect(() => parseConfig({ unlock: { maxGrantsBeforeRelock: 0 } })).toThrow(
+      'unlock.maxGrantsBeforeRelock must be a positive integer',
+    )
+    expect(() => parseConfig({ unlock: { maxGrantsBeforeRelock: 1.5 } })).toThrow(
+      'unlock.maxGrantsBeforeRelock must be a positive integer',
+    )
+  })
+
+  it('throws if unlock is not an object', () => {
+    expect(() => parseConfig({ unlock: 'bad' })).toThrow('unlock must be an object')
+  })
 })
