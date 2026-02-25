@@ -1,7 +1,16 @@
+import { join, dirname } from 'node:path'
 import type { AppConfig } from './config.js'
 import type { SecretListItem, SecretMetadata, ProcessResult } from './types.js'
 import type { AccessRequest } from './request.js'
+import { createAccessRequest, RequestLog } from './request.js'
+import type { NotificationChannel } from '../channels/channel.js'
 import { RemoteService } from './remote-service.js'
+import { EncryptedSecretStore } from './encrypted-store.js'
+import { UnlockSession } from './unlock-session.js'
+import { GrantManager } from './grant.js'
+import { WorkflowEngine } from './workflow.js'
+import { SecretInjector } from './injector.js'
+import { DiscordChannel } from '../channels/discord.js'
 
 // SecretSummary aliases existing SecretListItem shape
 export type SecretSummary = SecretListItem
@@ -37,54 +46,103 @@ export interface Service {
   ): Promise<ProcessResult>
 }
 
-function notImplemented(): never {
-  throw new Error('not implemented')
+interface LocalServiceDeps {
+  store: EncryptedSecretStore
+  unlockSession: UnlockSession
+  grantManager: GrantManager
+  workflowEngine: WorkflowEngine
+  injector: SecretInjector
+  requestLog: RequestLog
+  startTime: number
 }
 
 export class LocalService implements Service {
+  private readonly onLocked: () => void
+
+  constructor(private readonly deps: LocalServiceDeps) {
+    // When session auto-locks (TTL/idle/max-grants), also lock the encrypted store
+    this.onLocked = () => deps.store.lock()
+    deps.unlockSession.on('locked', this.onLocked)
+  }
+
+  destroy(): void {
+    this.deps.unlockSession.off('locked', this.onLocked)
+  }
+
+  // Called by `2kc unlock` CLI command — not on the Service interface
+  async unlock(password: string): Promise<void> {
+    await this.deps.store.unlock(password)
+    const dek = this.deps.store.getDek()
+    if (!dek) throw new Error('Failed to obtain DEK after unlock')
+    this.deps.unlockSession.unlock(dek)
+  }
+
+  // Called by `2kc lock` CLI command — not on the Service interface
+  lock(): void {
+    this.deps.unlockSession.lock()
+    // EncryptedSecretStore.lock() is called via the 'locked' event handler above
+  }
+
   async health(): Promise<{ status: string; uptime?: number }> {
-    notImplemented()
+    return {
+      status: this.deps.unlockSession.isUnlocked() ? 'unlocked' : 'locked',
+      uptime: Date.now() - this.deps.startTime,
+    }
   }
 
   secrets: Service['secrets'] = {
-    async list() {
-      notImplemented()
+    list: async () => this.deps.store.list(),
+
+    add: async (ref, value, tags) => {
+      if (!this.deps.unlockSession.isUnlocked()) {
+        throw new Error('Store is locked. Run `2kc unlock` first.')
+      }
+      const uuid = this.deps.store.add(ref, value, tags)
+      return { uuid }
     },
-    async add() {
-      notImplemented()
+
+    remove: async (uuid) => {
+      this.deps.store.remove(uuid)
     },
-    async remove() {
-      notImplemented()
-    },
-    async getMetadata() {
-      notImplemented()
-    },
-    async resolve() {
-      notImplemented()
-    },
+
+    getMetadata: async (uuid) => this.deps.store.getMetadata(uuid),
+
+    resolve: async (refOrUuid) => this.deps.store.resolve(refOrUuid),
   }
 
   requests: Service['requests'] = {
-    async create() {
-      notImplemented()
+    create: async (secretUuids, reason, taskRef, duration) => {
+      const request = createAccessRequest(secretUuids, reason, taskRef, duration)
+      this.deps.requestLog.add(request)
+      const outcome = await this.deps.workflowEngine.processRequest(request)
+      if (outcome === 'approved') {
+        this.deps.grantManager.createGrant(request)
+      }
+      return request
     },
   }
 
   grants: Service['grants'] = {
-    async validate() {
-      notImplemented()
+    validate: async (requestId) => {
+      const grant = this.deps.grantManager.getGrantByRequestId(requestId)
+      if (!grant) return false
+      return this.deps.grantManager.validateGrant(grant.id)
     },
   }
 
   async inject(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     requestId: string,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     command: string,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     options?: { envVarName?: string },
   ): Promise<ProcessResult> {
-    notImplemented()
+    if (!this.deps.unlockSession.isUnlocked()) {
+      throw new Error('Store is locked. Run `2kc unlock` first.')
+    }
+    const grant = this.deps.grantManager.getGrantByRequestId(requestId)
+    if (!grant) throw new Error(`No grant found for request: ${requestId}`)
+    const result = await this.deps.injector.inject(grant.id, ['/bin/sh', '-c', command], options)
+    this.deps.unlockSession.recordGrantUsage()
+    return result
   }
 }
 
@@ -92,5 +150,42 @@ export function resolveService(config: AppConfig): Service {
   if (config.mode === 'client') {
     return new RemoteService(config.server)
   }
-  return new LocalService()
+
+  const grantsPath = join(dirname(config.store.path), 'grants.json')
+
+  const store = new EncryptedSecretStore(config.store.path)
+  const unlockSession = new UnlockSession(config.unlock)
+  const grantManager = new GrantManager(grantsPath)
+
+  let channel: NotificationChannel
+  if (config.discord) {
+    channel = new DiscordChannel(config.discord)
+  } else if (config.defaultRequireApproval) {
+    throw new Error('Discord must be configured when defaultRequireApproval is true')
+  } else {
+    channel = {
+      async sendApprovalRequest() {
+        return 'noop'
+      },
+      async waitForResponse() {
+        return 'approved' as const
+      },
+      async sendNotification() {},
+    }
+  }
+
+  const workflowEngine = new WorkflowEngine({ store, channel, config })
+  const injector = new SecretInjector(grantManager, store)
+  const requestLog = new RequestLog()
+  const startTime = Date.now()
+
+  return new LocalService({
+    store,
+    unlockSession,
+    grantManager,
+    workflowEngine,
+    injector,
+    requestLog,
+    startTime,
+  })
 }

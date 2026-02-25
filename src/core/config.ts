@@ -113,7 +113,7 @@ function parseServerConfig(raw: unknown): ServerConfig {
 }
 
 function parseStoreConfig(raw: unknown): StoreConfig {
-  const defaultPath = '~/.2kc/secrets.json'
+  const defaultPath = '~/.2kc/secrets.enc.json'
   if (raw === undefined || raw === null) return { path: resolveTilde(defaultPath) }
   if (!isRecord(raw)) {
     throw new Error('store must be an object')
@@ -166,7 +166,7 @@ export function defaultConfig(): AppConfig {
   return {
     mode: 'standalone',
     server: { host: '127.0.0.1', port: 2274 },
-    store: { path: resolveTilde('~/.2kc/secrets.json') },
+    store: { path: resolveTilde('~/.2kc/secrets.enc.json') },
     unlock: { ttlMs: 900_000 },
     discord: undefined,
     requireApproval: {},

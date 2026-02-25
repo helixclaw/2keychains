@@ -344,6 +344,37 @@ describe('GrantManager', () => {
     })
   })
 
+  describe('getGrantByRequestId', () => {
+    it('returns grant matching the requestId', () => {
+      const manager = new GrantManager()
+      const request = makeApprovedRequest()
+      const grant = manager.createGrant(request)
+
+      const found = manager.getGrantByRequestId(request.id)
+      expect(found).toBeDefined()
+      expect(found!.id).toBe(grant.id)
+      expect(found!.requestId).toBe(request.id)
+    })
+
+    it('returns a copy (not the original)', () => {
+      const manager = new GrantManager()
+      const request = makeApprovedRequest()
+      manager.createGrant(request)
+
+      const found = manager.getGrantByRequestId(request.id)
+      if (found) {
+        found.used = true
+      }
+      const again = manager.getGrantByRequestId(request.id)
+      expect(again!.used).toBe(false)
+    })
+
+    it('returns undefined when no grant matches', () => {
+      const manager = new GrantManager()
+      expect(manager.getGrantByRequestId('nonexistent')).toBeUndefined()
+    })
+  })
+
   describe('getGrantSecrets', () => {
     it('returns secretUuids array for valid grant', () => {
       const manager = new GrantManager()

@@ -4,14 +4,17 @@ import { join } from 'node:path'
 
 vi.mock('node:fs', () => ({
   readFileSync: vi.fn(),
+  writeFileSync: vi.fn(),
+  mkdirSync: vi.fn(),
+  chmodSync: vi.fn(),
 }))
 
 vi.mock('node:os', () => ({
   homedir: vi.fn(() => '/tmp/test-home'),
 }))
 
-import { readFileSync } from 'node:fs'
-import { loadConfig, parseConfig, resolveTilde } from '../core/config.js'
+import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
+import { loadConfig, parseConfig, resolveTilde, saveConfig, defaultConfig } from '../core/config.js'
 
 const mockReadFileSync = vi.mocked(readFileSync)
 
@@ -63,7 +66,7 @@ describe('loadConfig', () => {
     const config = loadConfig()
     expect(config.mode).toBe('standalone')
     expect(config.server).toEqual({ host: '127.0.0.1', port: 2274 })
-    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.json'))
+    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.enc.json'))
     expect(config.discord).toBeUndefined()
     expect(config.requireApproval).toEqual({})
     expect(config.defaultRequireApproval).toBe(false)
@@ -100,7 +103,7 @@ describe('parseConfig', () => {
     const config = parseConfig(minimalValid)
     expect(config.mode).toBe('standalone')
     expect(config.server).toEqual({ host: '127.0.0.1', port: 2274 })
-    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.json'))
+    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.enc.json'))
     expect(config.discord).toBeUndefined()
     expect(config.requireApproval).toEqual({})
     expect(config.defaultRequireApproval).toBe(false)
@@ -173,7 +176,7 @@ describe('parseConfig', () => {
 
   it('uses default store.path when missing', () => {
     const config = parseConfig({})
-    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.json'))
+    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.enc.json'))
   })
 
   it('allows config with no discord section (all optional)', () => {
@@ -288,5 +291,79 @@ describe('parseConfig', () => {
 
   it('throws if unlock is not an object', () => {
     expect(() => parseConfig({ unlock: 'bad' })).toThrow('unlock must be an object')
+  })
+
+  it('throws if store.path is empty string', () => {
+    expect(() => parseConfig({ store: { path: '' } })).toThrow(
+      'store.path must be a non-empty string',
+    )
+  })
+
+  it('throws if store.path is non-string', () => {
+    expect(() => parseConfig({ store: { path: 123 } })).toThrow(
+      'store.path must be a non-empty string',
+    )
+  })
+
+  it('throws if store is not an object', () => {
+    expect(() => parseConfig({ store: 'bad' })).toThrow('store must be an object')
+  })
+
+  it('throws if server is not an object', () => {
+    expect(() => parseConfig({ server: 'bad' })).toThrow('server must be an object')
+  })
+
+  it('throws if server.host is empty string', () => {
+    expect(() => parseConfig({ server: { host: '' } })).toThrow(
+      'server.host must be a non-empty string',
+    )
+  })
+
+  it('throws if discord is not an object', () => {
+    expect(() => parseConfig({ discord: 'bad' })).toThrow('discord must be an object')
+  })
+})
+
+describe('saveConfig', () => {
+  const mockWriteFileSync = vi.mocked(writeFileSync)
+  const mockMkdirSync = vi.mocked(mkdirSync)
+  const mockChmodSync = vi.mocked(chmodSync)
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('writes config JSON to the specified path with 0600 permissions', () => {
+    const config = defaultConfig()
+    saveConfig(config, '/tmp/test-config/config.json')
+
+    expect(mockMkdirSync).toHaveBeenCalledWith('/tmp/test-config', { recursive: true })
+    expect(mockWriteFileSync).toHaveBeenCalledWith(
+      '/tmp/test-config/config.json',
+      expect.any(String),
+      'utf-8',
+    )
+    expect(mockChmodSync).toHaveBeenCalledWith('/tmp/test-config/config.json', 0o600)
+
+    // Verify JSON is valid and matches config
+    const writtenJson = mockWriteFileSync.mock.calls[0][1] as string
+    const parsed = JSON.parse(writtenJson)
+    expect(parsed.mode).toBe('standalone')
+  })
+})
+
+describe('loadConfig edge cases', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('re-throws non-ENOENT errors from readFileSync', () => {
+    const err = new Error('EACCES') as NodeJS.ErrnoException
+    err.code = 'EACCES'
+    mockReadFileSync.mockImplementation(() => {
+      throw err
+    })
+
+    expect(() => loadConfig()).toThrow('EACCES')
   })
 })

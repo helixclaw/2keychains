@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 
 import type { SecretListItem, SecretMetadata } from './types.js'
+import type { ISecretStore } from './secret-store.js'
 import type { EncryptedValue } from './crypto.js'
 import { generateDek, buildAad, encryptValue, decryptValue, wrapDek, unwrapDek } from './crypto.js'
 import { deriveKek, generateSalt, DEFAULT_SCRYPT_PARAMS } from './kdf.js'
@@ -36,7 +37,7 @@ export interface EncryptedStoreFile {
   secrets: EncryptedSecretEntry[]
 }
 
-export class EncryptedSecretStore {
+export class EncryptedSecretStore implements ISecretStore {
   private readonly filePath: string
   private dek: Buffer | null = null
 
@@ -47,6 +48,12 @@ export class EncryptedSecretStore {
   /** Whether the store is currently unlocked (DEK available in memory). */
   get isUnlocked(): boolean {
     return this.dek !== null
+  }
+
+  /** Returns a copy of the DEK currently held in memory, or null if locked. */
+  getDek(): Buffer | null {
+    if (!this.dek) return null
+    return Buffer.from(this.dek) // return a copy to prevent callers from zeroing internal buffer
   }
 
   /** Lock the store by discarding the DEK from memory. */

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import type { GrantManager } from './grant.js'
-import type { SecretStore } from './secret-store.js'
+import type { ISecretStore } from './secret-store.js'
 import type { ProcessResult } from './types.js'
 import { RedactTransform } from './redact.js'
 
@@ -17,7 +17,7 @@ const PLACEHOLDER_RE = /^2k:\/\/(.+)$/
 export class SecretInjector {
   constructor(
     private readonly grantManager: GrantManager,
-    private readonly secretStore: SecretStore,
+    private readonly secretStore: ISecretStore,
   ) {}
 
   async inject(
