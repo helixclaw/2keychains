@@ -10,7 +10,19 @@ const DEFAULT_PATH = join(homedir(), '.2kc', 'secrets.json')
 const REF_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-export class SecretStore {
+export interface ISecretStore {
+  list(): SecretListItem[]
+  add(ref: string, value: string, tags?: string[]): string
+  remove(uuid: string): boolean
+  getMetadata(uuid: string): SecretMetadata
+  getValue(uuid: string): string
+  getByRef(ref: string): SecretMetadata
+  getValueByRef(ref: string): string
+  resolve(refOrUuid: string): SecretMetadata
+  resolveRef(refOrUuid: string): { uuid: string; value: string }
+}
+
+export class SecretStore implements ISecretStore {
   private readonly filePath: string
 
   constructor(filePath: string = DEFAULT_PATH) {

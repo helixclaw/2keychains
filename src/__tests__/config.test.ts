@@ -63,7 +63,7 @@ describe('loadConfig', () => {
     const config = loadConfig()
     expect(config.mode).toBe('standalone')
     expect(config.server).toEqual({ host: '127.0.0.1', port: 2274 })
-    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.json'))
+    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.enc.json'))
     expect(config.discord).toBeUndefined()
     expect(config.requireApproval).toEqual({})
     expect(config.defaultRequireApproval).toBe(false)
@@ -100,7 +100,7 @@ describe('parseConfig', () => {
     const config = parseConfig(minimalValid)
     expect(config.mode).toBe('standalone')
     expect(config.server).toEqual({ host: '127.0.0.1', port: 2274 })
-    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.json'))
+    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.enc.json'))
     expect(config.discord).toBeUndefined()
     expect(config.requireApproval).toEqual({})
     expect(config.defaultRequireApproval).toBe(false)
@@ -173,7 +173,7 @@ describe('parseConfig', () => {
 
   it('uses default store.path when missing', () => {
     const config = parseConfig({})
-    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.json'))
+    expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.enc.json'))
   })
 
   it('allows config with no discord section (all optional)', () => {

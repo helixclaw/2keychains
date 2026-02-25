@@ -1,12 +1,12 @@
 import type { NotificationChannel } from '../channels/channel.js'
 import type { AccessRequest } from './request.js'
 import type { AccessRequest as ChannelAccessRequest } from './types.js'
-import type { SecretStore } from './secret-store.js'
+import type { ISecretStore } from './secret-store.js'
 import type { SecretMetadata } from './types.js'
 import type { AppConfig } from './config.js'
 
 export interface WorkflowDeps {
-  store: SecretStore
+  store: ISecretStore
   channel: NotificationChannel
   config: Pick<AppConfig, 'requireApproval' | 'defaultRequireApproval' | 'approvalTimeoutMs'>
 }
@@ -40,7 +40,7 @@ function toChannelRequest(
 }
 
 export class WorkflowEngine {
-  private store: SecretStore
+  private store: ISecretStore
   private channel: NotificationChannel
   private config: WorkflowDeps['config']
 

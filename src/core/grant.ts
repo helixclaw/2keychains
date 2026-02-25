@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { homedir } from 'node:os'
 import type { AccessRequest } from './request.js'
 
 export interface AccessGrant {
@@ -11,8 +14,16 @@ export interface AccessGrant {
   revokedAt: string | null
 }
 
+const DEFAULT_GRANTS_PATH = join(homedir(), '.2kc', 'grants.json')
+
 export class GrantManager {
   private grants: Map<string, AccessGrant> = new Map()
+  private readonly grantsFilePath: string
+
+  constructor(grantsFilePath: string = DEFAULT_GRANTS_PATH) {
+    this.grantsFilePath = grantsFilePath
+    this.load()
+  }
 
   createGrant(request: AccessRequest): AccessGrant {
     if (request.status !== 'approved') {
@@ -29,6 +40,7 @@ export class GrantManager {
       revokedAt: null,
     }
     this.grants.set(grant.id, grant)
+    this.save()
     return grant
   }
 
@@ -50,6 +62,7 @@ export class GrantManager {
       throw new Error(`Grant is not valid: ${grantId}`)
     }
     grant.used = true
+    this.save()
   }
 
   revokeGrant(grantId: string): void {
@@ -61,6 +74,7 @@ export class GrantManager {
       throw new Error(`Grant already revoked: ${grantId}`)
     }
     grant.revokedAt = new Date().toISOString()
+    this.save()
   }
 
   cleanup(): void {
@@ -83,5 +97,29 @@ export class GrantManager {
     const grant = this.grants.get(grantId)
     if (!grant) return undefined
     return [...grant.secretUuids]
+  }
+
+  getGrantByRequestId(requestId: string): AccessGrant | undefined {
+    for (const grant of this.grants.values()) {
+      if (grant.requestId === requestId) return { ...grant }
+    }
+    return undefined
+  }
+
+  private load(): void {
+    try {
+      const data = JSON.parse(readFileSync(this.grantsFilePath, 'utf-8')) as AccessGrant[]
+      for (const grant of data) this.grants.set(grant.id, grant)
+    } catch {
+      // File absent or corrupted — start with empty map
+    }
+  }
+
+  private save(): void {
+    const dir = dirname(this.grantsFilePath)
+    mkdirSync(dir, { recursive: true })
+    const grants = [...this.grants.values()]
+    writeFileSync(this.grantsFilePath, JSON.stringify(grants, null, 2), 'utf-8')
+    chmodSync(this.grantsFilePath, 0o600)
   }
 }
