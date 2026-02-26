@@ -33,6 +33,8 @@ export interface AccessRequest {
   justification: string
   durationMs: number
   secretNames: string[]
+  command?: string
+  commandHash?: string
 }
 
 export interface ProcessResult {

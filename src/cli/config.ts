@@ -78,6 +78,7 @@ config
         requireApproval: {},
         defaultRequireApproval: opts.defaultRequireApproval,
         approvalTimeoutMs,
+        bindCommand: false,
       }
 
       saveConfig(appConfig)
@@ -108,6 +109,7 @@ config
       requireApproval: appConfig.requireApproval,
       defaultRequireApproval: appConfig.defaultRequireApproval,
       approvalTimeoutMs: appConfig.approvalTimeoutMs,
+      bindCommand: appConfig.bindCommand,
     }
 
     if (appConfig.discord) {

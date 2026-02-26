@@ -76,6 +76,28 @@ describe('DiscordChannel', () => {
       )
     })
 
+    it('should include Bound Command field when commandHash is present', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: '789012' }),
+      })
+
+      const requestWithHash: AccessRequest = {
+        ...TEST_REQUEST,
+        command: 'echo hello',
+        commandHash: 'abc123deadbeef',
+      }
+
+      await channel.sendApprovalRequest(requestWithHash)
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+      const fields = body.embeds[0].fields
+      const boundCommandField = fields.find((f: { name: string }) => f.name === 'Bound Command')
+      expect(boundCommandField).toBeDefined()
+      expect(boundCommandField.value).toContain('`echo hello`')
+      expect(boundCommandField.value).toContain('abc123deadbeef')
+    })
+
     it('should throw on non-ok response from webhook', async () => {
       fetchMock.mockResolvedValueOnce({
         ok: false,

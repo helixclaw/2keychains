@@ -125,6 +125,7 @@ function makeService() {
     injector,
     requestLog,
     startTime,
+    bindCommand: false,
   })
   return {
     service,
@@ -230,6 +231,42 @@ describe('LocalService', () => {
       expect(grantManager.createGrant).toHaveBeenCalledWith(result)
     })
 
+    it('computes commandHash when bindCommand is true and command is provided', async () => {
+      const {
+        store,
+        unlockSession,
+        grantManager,
+        workflowEngine,
+        injector,
+        requestLog,
+        startTime,
+      } = makeService()
+      const serviceWithBind = new LocalService({
+        store,
+        unlockSession,
+        grantManager,
+        workflowEngine,
+        injector,
+        requestLog,
+        startTime,
+        bindCommand: true,
+      })
+      ;(workflowEngine.processRequest as MockInstance).mockImplementation(async (req) => {
+        req.status = 'approved'
+        return 'approved'
+      })
+      const result = await serviceWithBind.requests.create(
+        ['u1'],
+        'need access',
+        'task-1',
+        300,
+        'echo hello',
+      )
+      expect(result.commandHash).toBeDefined()
+      expect(typeof result.commandHash).toBe('string')
+      expect(result.command).toBe('echo hello')
+    })
+
     it('returns request with denied status when workflow denies', async () => {
       const { service, workflowEngine, grantManager, requestLog } = makeService()
       ;(workflowEngine.processRequest as MockInstance).mockImplementation(async (req) => {
@@ -287,6 +324,37 @@ describe('LocalService', () => {
       ;(grantManager.getGrantByRequestId as MockInstance).mockReturnValue(undefined)
       await expect(service.inject('missing-request', 'echo hello')).rejects.toThrow(
         'No grant found for request: missing-request',
+      )
+    })
+
+    it('passes when grant has no commandHash (pre-binding grants)', async () => {
+      const { service, grantManager, injector } = makeService()
+      const grant = makeGrantMock({ commandHash: undefined })
+      ;(grantManager.getGrantByRequestId as MockInstance).mockReturnValue(grant)
+      const result = await service.inject('request-id', 'echo hello')
+      expect(injector.inject).toHaveBeenCalled()
+      expect(result).toEqual({ exitCode: 0, stdout: 'ok', stderr: '' })
+    })
+
+    it('passes when command hash matches grant commandHash', async () => {
+      const { service, grantManager, injector } = makeService()
+      // Pre-compute the hash of normalizeCommand('echo hello') = 'echo hello'
+      // SHA-256 of 'echo hello'
+      const { hashCommand, normalizeCommand } = await import('../core/command-hash.js')
+      const expectedHash = hashCommand(normalizeCommand('echo hello'))
+      const grant = makeGrantMock({ commandHash: expectedHash })
+      ;(grantManager.getGrantByRequestId as MockInstance).mockReturnValue(grant)
+      const result = await service.inject('request-id', 'echo hello')
+      expect(injector.inject).toHaveBeenCalled()
+      expect(result).toEqual({ exitCode: 0, stdout: 'ok', stderr: '' })
+    })
+
+    it('throws when command hash does not match grant commandHash', async () => {
+      const { service, grantManager } = makeService()
+      const grant = makeGrantMock({ commandHash: 'wrong-hash-that-does-not-match' })
+      ;(grantManager.getGrantByRequestId as MockInstance).mockReturnValue(grant)
+      await expect(service.inject('request-id', 'echo hello')).rejects.toThrow(
+        'Command does not match the approved command hash',
       )
     })
   })

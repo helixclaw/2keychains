@@ -10,6 +10,8 @@ export interface AccessRequest {
   durationSeconds: number
   requestedAt: string
   status: AccessRequestStatus
+  command?: string
+  commandHash?: string
 }
 
 const MIN_DURATION_SECONDS = 30
@@ -21,6 +23,8 @@ export function createAccessRequest(
   reason: string,
   taskRef: string,
   durationSeconds: number = DEFAULT_DURATION_SECONDS,
+  command?: string,
+  commandHash?: string,
 ): AccessRequest {
   if (!Array.isArray(secretUuids) || secretUuids.length === 0) {
     throw new Error('secretUuids must be a non-empty array')
@@ -60,6 +64,8 @@ export function createAccessRequest(
     durationSeconds,
     requestedAt: new Date().toISOString(),
     status: 'pending',
+    command,
+    commandHash,
   }
 }
 

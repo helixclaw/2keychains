@@ -36,6 +36,8 @@ function toChannelRequest(
     justification: request.reason,
     durationMs: request.durationSeconds * 1000,
     secretNames: metadataList.map((m) => m.ref),
+    command: request.command,
+    commandHash: request.commandHash,
   }
 }
 

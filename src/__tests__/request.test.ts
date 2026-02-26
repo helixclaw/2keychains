@@ -176,6 +176,29 @@ describe('createAccessRequest', () => {
       expect(req.secretUuids).toEqual(['single-uuid'])
     })
   })
+
+  describe('command and commandHash fields', () => {
+    it('stores command and commandHash when provided', () => {
+      const req = createAccessRequest(
+        validArgs.secretUuids,
+        validArgs.reason,
+        validArgs.taskRef,
+        300,
+        'echo hello',
+        'abc123hash',
+      )
+
+      expect(req.command).toBe('echo hello')
+      expect(req.commandHash).toBe('abc123hash')
+    })
+
+    it('command and commandHash are undefined when not provided', () => {
+      const req = createAccessRequest(validArgs.secretUuids, validArgs.reason, validArgs.taskRef)
+
+      expect(req.command).toBeUndefined()
+      expect(req.commandHash).toBeUndefined()
+    })
+  })
 })
 
 describe('RequestLog', () => {

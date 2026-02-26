@@ -39,20 +39,25 @@ export class DiscordChannel implements NotificationChannel {
   }
 
   async sendApprovalRequest(request: AccessRequest): Promise<string> {
+    const fields: { name: string; value: string; inline?: boolean }[] = [
+      { name: 'UUIDs', value: request.uuids.join(', '), inline: true },
+      { name: 'Requester', value: request.requester, inline: true },
+      { name: 'Secrets', value: request.secretNames.join(', '), inline: true },
+      { name: 'Justification', value: request.justification },
+      { name: 'Duration', value: formatDuration(request.durationMs), inline: true },
+    ]
+
+    if (request.commandHash) {
+      fields.push({
+        name: 'Bound Command',
+        value: `\`${request.command}\`\nHash: ${request.commandHash}`,
+      })
+    }
+
     const embed = {
       title: 'Access Request',
       color: 0xffa500,
-      fields: [
-        { name: 'UUIDs', value: request.uuids.join(', '), inline: true },
-        { name: 'Requester', value: request.requester, inline: true },
-        { name: 'Secrets', value: request.secretNames.join(', '), inline: true },
-        { name: 'Justification', value: request.justification },
-        {
-          name: 'Duration',
-          value: formatDuration(request.durationMs),
-          inline: true,
-        },
-      ],
+      fields,
     }
 
     const url = `${this.webhookUrl}?wait=true`

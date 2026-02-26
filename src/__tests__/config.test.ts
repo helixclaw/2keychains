@@ -71,6 +71,7 @@ describe('loadConfig', () => {
     expect(config.requireApproval).toEqual({})
     expect(config.defaultRequireApproval).toBe(false)
     expect(config.approvalTimeoutMs).toBe(300_000)
+    expect(config.bindCommand).toBe(false)
   })
 
   it('should throw on invalid JSON', () => {
@@ -343,6 +344,26 @@ describe('parseConfig', () => {
 
   it('throws if discord is not an object', () => {
     expect(() => parseConfig({ discord: 'bad' })).toThrow('discord must be an object')
+  })
+
+  it('parses bindCommand: true correctly', () => {
+    const config = parseConfig({ bindCommand: true })
+    expect(config.bindCommand).toBe(true)
+  })
+
+  it('parses bindCommand: false correctly', () => {
+    const config = parseConfig({ bindCommand: false })
+    expect(config.bindCommand).toBe(false)
+  })
+
+  it('defaults bindCommand to false when missing', () => {
+    const config = parseConfig({})
+    expect(config.bindCommand).toBe(false)
+  })
+
+  it('defaults bindCommand to false for non-boolean value', () => {
+    const config = parseConfig({ bindCommand: 'yes' })
+    expect(config.bindCommand).toBe(false)
   })
 })
 

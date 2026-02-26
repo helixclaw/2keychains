@@ -8,6 +8,7 @@ import { RemoteService } from './remote-service.js'
 import { EncryptedSecretStore } from './encrypted-store.js'
 import { UnlockSession } from './unlock-session.js'
 import { GrantManager } from './grant.js'
+import { normalizeCommand, hashCommand } from './command-hash.js'
 import { WorkflowEngine } from './workflow.js'
 import { SecretInjector } from './injector.js'
 import { DiscordChannel } from '../channels/discord.js'
@@ -33,6 +34,7 @@ export interface Service {
       reason: string,
       taskRef: string,
       duration?: number,
+      command?: string,
     ): Promise<AccessRequest>
   }
 
@@ -55,6 +57,7 @@ interface LocalServiceDeps {
   injector: SecretInjector
   requestLog: RequestLog
   startTime: number
+  bindCommand: boolean
 }
 
 export class LocalService implements Service {
@@ -112,8 +115,19 @@ export class LocalService implements Service {
   }
 
   requests: Service['requests'] = {
-    create: async (secretUuids, reason, taskRef, duration) => {
-      const request = createAccessRequest(secretUuids, reason, taskRef, duration)
+    create: async (secretUuids, reason, taskRef, duration, command) => {
+      let commandHash: string | undefined
+      if (this.deps.bindCommand && command) {
+        commandHash = hashCommand(normalizeCommand(command))
+      }
+      const request = createAccessRequest(
+        secretUuids,
+        reason,
+        taskRef,
+        duration,
+        command,
+        commandHash,
+      )
       this.deps.requestLog.add(request)
       const outcome = await this.deps.workflowEngine.processRequest(request)
       if (outcome === 'approved') {
@@ -141,6 +155,11 @@ export class LocalService implements Service {
     }
     const grant = this.deps.grantManager.getGrantByRequestId(requestId)
     if (!grant) throw new Error(`No grant found for request: ${requestId}`)
+    if (grant.commandHash) {
+      if (hashCommand(normalizeCommand(command)) !== grant.commandHash) {
+        throw new Error('Command does not match the approved command hash')
+      }
+    }
     const result = await this.deps.injector.inject(grant.id, ['/bin/sh', '-c', command], options)
     this.deps.unlockSession.recordGrantUsage()
     return result
@@ -190,5 +209,6 @@ export async function resolveService(config: AppConfig): Promise<Service> {
     injector,
     requestLog,
     startTime,
+    bindCommand: config.bindCommand,
   })
 }

@@ -41,6 +41,7 @@ const request = new Command('request')
           opts.reason,
           opts.task,
           durationSeconds,
+          opts.cmd,
         )
 
         // 4. Validate grant

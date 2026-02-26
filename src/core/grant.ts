@@ -13,6 +13,7 @@ export interface AccessGrant {
   expiresAt: string
   used: boolean
   revokedAt: string | null
+  commandHash?: string
 }
 
 const DEFAULT_GRANTS_PATH = join(homedir(), '.2kc', 'grants.json')
@@ -42,6 +43,7 @@ export class GrantManager {
       expiresAt: new Date(now + request.durationSeconds * 1000).toISOString(),
       used: false,
       revokedAt: null,
+      commandHash: request.commandHash,
     }
     this.grants.set(grant.id, grant)
     let jws: string | null = null

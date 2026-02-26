@@ -34,6 +34,7 @@ export interface AppConfig {
   requireApproval: Record<string, boolean>
   defaultRequireApproval: boolean
   approvalTimeoutMs: number
+  bindCommand: boolean
 }
 
 export const CONFIG_PATH = resolve(homedir(), '.2kc', 'config.json')
@@ -180,6 +181,7 @@ export function defaultConfig(): AppConfig {
     requireApproval: {},
     defaultRequireApproval: false,
     approvalTimeoutMs: 300_000,
+    bindCommand: false,
   }
 }
 
@@ -207,6 +209,7 @@ export function parseConfig(raw: unknown): AppConfig {
       typeof raw.approvalTimeoutMs === 'number' && raw.approvalTimeoutMs > 0
         ? raw.approvalTimeoutMs
         : 300_000,
+    bindCommand: typeof raw.bindCommand === 'boolean' ? raw.bindCommand : false,
   }
 }
 

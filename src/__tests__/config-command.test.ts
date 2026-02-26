@@ -232,6 +232,7 @@ describe('config init action', () => {
       requireApproval: {},
       defaultRequireApproval: false,
       approvalTimeoutMs: 60_000,
+      bindCommand: false,
     })
   })
 
@@ -460,6 +461,19 @@ describe('config show action', () => {
       discord: { webhookUrl: string }
     }
     expect(output.discord.webhookUrl).toBe('http://short.url')
+    logSpy.mockRestore()
+  })
+
+  it('shows bindCommand field in output', async () => {
+    const config = createValidConfig({ bindCommand: true } as Partial<AppConfig>)
+    mockReadFileSync.mockReturnValue(JSON.stringify(config))
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const { configCommand } = await import('../cli/config.js')
+    await configCommand.parseAsync(['show'], { from: 'user' })
+
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string) as Record<string, unknown>
+    expect(output).toHaveProperty('bindCommand', true)
     logSpy.mockRestore()
   })
 

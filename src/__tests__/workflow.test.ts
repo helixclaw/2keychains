@@ -230,6 +230,42 @@ describe('WorkflowEngine', () => {
     })
   })
 
+  describe('processRequest - commandHash forwarding', () => {
+    it('forwards commandHash to channel request when present on canonical request', async () => {
+      const store = createSingleMockStore({
+        uuid: 'secret-uuid-1',
+        ref: 'db-password',
+        tags: ['production'],
+      })
+      const channel = createMockChannel('approved')
+      const engine = new WorkflowEngine({ store, channel, config: createConfig() })
+      const request = createRequest({ commandHash: 'abc123hash' })
+
+      await engine.processRequest(request)
+
+      expect(channel.sendApprovalRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ commandHash: 'abc123hash' }),
+      )
+    })
+
+    it('forwards command to channel request when present on canonical request', async () => {
+      const store = createSingleMockStore({
+        uuid: 'secret-uuid-1',
+        ref: 'db-password',
+        tags: ['production'],
+      })
+      const channel = createMockChannel('approved')
+      const engine = new WorkflowEngine({ store, channel, config: createConfig() })
+      const request = createRequest({ command: 'echo hello', commandHash: 'abc123hash' })
+
+      await engine.processRequest(request)
+
+      expect(channel.sendApprovalRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'echo hello', commandHash: 'abc123hash' }),
+      )
+    })
+  })
+
   describe('processRequest - batch', () => {
     it('fetches metadata for all secretUuids', async () => {
       const store = createMockStore({

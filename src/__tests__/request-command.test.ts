@@ -118,6 +118,7 @@ describe('request command orchestration', () => {
       'need for deploy',
       'TICKET-123',
       300,
+      'echo hello',
     )
     expect(mockGrantsValidate).toHaveBeenCalledWith('test-request-id')
     expect(mockInject).toHaveBeenCalledWith('test-request-id', 'echo hello', {
@@ -180,6 +181,7 @@ describe('request command orchestration', () => {
       'need for deploy',
       'TICKET-123',
       600,
+      'echo hello',
     )
   })
 
@@ -192,6 +194,28 @@ describe('request command orchestration', () => {
       'need for deploy',
       'TICKET-123',
       300,
+      'echo hello',
+    )
+  })
+
+  it('--cmd value is forwarded as fifth argument to service.requests.create', async () => {
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    await runRequest([
+      'test-secret-uuid',
+      '--reason',
+      'need for deploy',
+      '--task',
+      'TICKET-123',
+      '--cmd',
+      'node /app/server.js',
+    ])
+
+    expect(mockRequestsCreate).toHaveBeenCalledWith(
+      ['test-secret-uuid'],
+      'need for deploy',
+      'TICKET-123',
+      300,
+      'node /app/server.js',
     )
   })
 
@@ -282,6 +306,7 @@ describe('request command orchestration', () => {
         'need for deploy',
         'TICKET-123',
         300,
+        'echo hello',
       )
     })
 
@@ -294,6 +319,7 @@ describe('request command orchestration', () => {
         'need for deploy',
         'TICKET-123',
         300,
+        'echo hello',
       )
     })
   })

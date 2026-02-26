@@ -94,6 +94,25 @@ describe('GrantManager', () => {
       })
     })
 
+    describe('commandHash', () => {
+      it('copies commandHash from request to grant when present', async () => {
+        const manager = new GrantManager()
+        const request = makeApprovedRequest()
+        request.commandHash = 'abc123deadbeef'
+        const { grant } = await manager.createGrant(request)
+
+        expect(grant.commandHash).toBe('abc123deadbeef')
+      })
+
+      it('grant has no commandHash when request had none', async () => {
+        const manager = new GrantManager()
+        const request = makeApprovedRequest()
+        const { grant } = await manager.createGrant(request)
+
+        expect(grant.commandHash).toBeUndefined()
+      })
+    })
+
     describe('batch', () => {
       it('copies secretUuids array from request', async () => {
         const manager = new GrantManager()
