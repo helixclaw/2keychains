@@ -100,7 +100,7 @@ function makeService() {
   const grantManager = {
     getGrantByRequestId: vi.fn().mockReturnValue(makeGrantMock()),
     validateGrant: vi.fn().mockReturnValue(true),
-    createGrant: vi.fn().mockResolvedValue({ grant: makeGrantMock(), jws: null }),
+    createGrant: vi.fn().mockReturnValue({ grant: makeGrantMock(), jws: undefined }),
   } as unknown as GrantManager
 
   const workflowEngine = {
@@ -113,6 +113,8 @@ function makeService() {
 
   const requestLog = {
     add: vi.fn(),
+    save: vi.fn(),
+    getById: vi.fn().mockReturnValue(undefined),
   } as unknown as RequestLog
 
   const startTime = Date.now() - 1000
@@ -219,16 +221,24 @@ describe('LocalService', () => {
   })
 
   describe('requests.create()', () => {
-    it('creates request, calls workflow, creates grant when approved', async () => {
-      const { service, workflowEngine, grantManager, requestLog } = makeService()
+    it('returns request with pending status immediately', async () => {
+      const { service, requestLog } = makeService()
+      const result = await service.requests.create(['u1'], 'need access', 'task-1', 300)
+      expect(result.status).toBe('pending')
+      expect(requestLog.add).toHaveBeenCalledWith(result)
+      expect(requestLog.save).toHaveBeenCalled()
+    })
+
+    it('runs workflow in background and creates grant when approved', async () => {
+      const { service, workflowEngine, grantManager } = makeService()
       ;(workflowEngine.processRequest as MockInstance).mockImplementation(async (req) => {
         req.status = 'approved'
         return 'approved'
       })
-      const result = await service.requests.create(['u1'], 'need access', 'task-1', 300)
-      expect(result.status).toBe('approved')
-      expect(requestLog.add).toHaveBeenCalledWith(result)
-      expect(grantManager.createGrant).toHaveBeenCalledWith(result)
+      await service.requests.create(['u1'], 'need access', 'task-1', 300)
+      await vi.waitFor(() => {
+        expect(grantManager.createGrant).toHaveBeenCalled()
+      })
     })
 
     it('computes commandHash when bindCommand is true and command is provided', async () => {
@@ -267,34 +277,63 @@ describe('LocalService', () => {
       expect(result.command).toBe('echo hello')
     })
 
-    it('returns request with denied status when workflow denies', async () => {
-      const { service, workflowEngine, grantManager, requestLog } = makeService()
+    it('does not create grant when workflow denies', async () => {
+      const { service, workflowEngine, grantManager } = makeService()
       ;(workflowEngine.processRequest as MockInstance).mockImplementation(async (req) => {
         req.status = 'denied'
         return 'denied'
       })
-      const result = await service.requests.create(['u1'], 'need access', 'task-1', 300)
-      expect(result.status).toBe('denied')
-      expect(requestLog.add).toHaveBeenCalledWith(result)
+      await service.requests.create(['u1'], 'need access', 'task-1', 300)
+      await vi.waitFor(() => {
+        // Wait for background task to complete
+        expect(workflowEngine.processRequest).toHaveBeenCalled()
+      })
       expect(grantManager.createGrant).not.toHaveBeenCalled()
+    })
+
+    it('sets status to denied on unexpected workflow error', async () => {
+      const { service, workflowEngine, requestLog } = makeService()
+      ;(workflowEngine.processRequest as MockInstance).mockRejectedValue(new Error('network error'))
+      const result = await service.requests.create(['u1'], 'need access', 'task-1', 300)
+      await vi.waitFor(() => {
+        expect(requestLog.save).toHaveBeenCalledTimes(2) // initial + error handler
+      })
+      expect(result.status).toBe('denied')
     })
   })
 
-  describe('grants.validate()', () => {
-    it('returns true for valid grant by requestId', async () => {
-      const { service, grantManager } = makeService()
-      ;(grantManager.getGrantByRequestId as MockInstance).mockReturnValue(makeGrantMock())
-      ;(grantManager.validateGrant as MockInstance).mockReturnValue(true)
-      const result = await service.grants.validate('request-id')
-      expect(result).toBe(true)
+  describe('grants.getStatus()', () => {
+    it('returns approved status with grant and jws when grant exists', async () => {
+      const { service, grantManager, requestLog } = makeService()
+      const pendingReq = { status: 'approved' as const, id: 'request-id' }
+      ;(requestLog.getById as MockInstance).mockReturnValue(pendingReq)
+      const grantWithJws = { ...makeGrantMock(), jws: 'test.jws.token' }
+      ;(grantManager.getGrantByRequestId as MockInstance).mockReturnValue(grantWithJws)
+
+      const result = await service.grants.getStatus('request-id')
+      expect(result.status).toBe('approved')
+      expect(result.grant).toBeDefined()
+      expect(result.jws).toBe('test.jws.token')
     })
 
-    it('returns false when no grant found for requestId', async () => {
-      const { service, grantManager } = makeService()
+    it('returns pending status when request exists but no grant yet', async () => {
+      const { service, grantManager, requestLog } = makeService()
+      ;(requestLog.getById as MockInstance).mockReturnValue({ status: 'pending', id: 'request-id' })
       ;(grantManager.getGrantByRequestId as MockInstance).mockReturnValue(undefined)
-      const result = await service.grants.validate('unknown-request')
-      expect(result).toBe(false)
-      expect(grantManager.validateGrant).not.toHaveBeenCalled()
+
+      const result = await service.grants.getStatus('request-id')
+      expect(result.status).toBe('pending')
+      expect(result.grant).toBeUndefined()
+      expect(result.jws).toBeUndefined()
+    })
+
+    it('throws when requestId not found', async () => {
+      const { service, requestLog } = makeService()
+      ;(requestLog.getById as MockInstance).mockReturnValue(undefined)
+
+      await expect(service.grants.getStatus('unknown')).rejects.toThrow(
+        'Request not found: unknown',
+      )
     })
   })
 

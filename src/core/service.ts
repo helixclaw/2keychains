@@ -1,8 +1,9 @@
 import { join, dirname } from 'node:path'
 import type { AppConfig } from './config.js'
 import type { SecretListItem, SecretMetadata, ProcessResult } from './types.js'
-import type { AccessRequest } from './request.js'
+import type { AccessRequest, AccessRequestStatus } from './request.js'
 import { createAccessRequest, RequestLog } from './request.js'
+import type { AccessGrant } from './grant.js'
 import type { NotificationChannel } from '../channels/channel.js'
 import { RemoteService } from './remote-service.js'
 import { EncryptedSecretStore } from './encrypted-store.js'
@@ -39,7 +40,9 @@ export interface Service {
   }
 
   grants: {
-    validate(requestId: string): Promise<boolean>
+    getStatus(
+      requestId: string,
+    ): Promise<{ status: AccessRequestStatus; grant?: AccessGrant; jws?: string }>
   }
 
   inject(
@@ -129,20 +132,41 @@ export class LocalService implements Service {
         commandHash,
       )
       this.deps.requestLog.add(request)
-      const outcome = await this.deps.workflowEngine.processRequest(request)
-      if (outcome === 'approved') {
-        await this.deps.grantManager.createGrant(request)
-      }
-      return request
+      this.deps.requestLog.save()
+      // Fire-and-forget: kick off workflow in background
+      this.runWorkflow(request).catch((err: unknown) => {
+        console.error('runWorkflow failed unexpectedly:', err)
+        request.status = 'denied'
+        this.deps.requestLog.save()
+      })
+      return request // always returns with status: 'pending'
     },
   }
 
   grants: Service['grants'] = {
-    validate: async (requestId) => {
+    getStatus: async (requestId) => {
+      const request = this.deps.requestLog.getById(requestId)
+      if (!request) throw new Error(`Request not found: ${requestId}`)
       const grant = this.deps.grantManager.getGrantByRequestId(requestId)
-      if (!grant) return false
-      return this.deps.grantManager.validateGrant(grant.id)
+      return {
+        status: request.status,
+        grant: grant,
+        jws: grant?.jws,
+      }
     },
+  }
+
+  private async runWorkflow(request: AccessRequest): Promise<void> {
+    const outcome = await this.deps.workflowEngine.processRequest(request)
+    if (outcome === 'approved') {
+      try {
+        this.deps.grantManager.createGrant(request)
+      } catch (err: unknown) {
+        console.error('createGrant failed after workflow approval:', err)
+        request.status = 'error'
+      }
+    }
+    this.deps.requestLog.save()
   }
 
   async inject(
@@ -176,7 +200,8 @@ export async function resolveService(config: AppConfig): Promise<Service> {
     return new RemoteService(config.server, { unlockSession, injector })
   }
 
-  const grantsPath = join(dirname(config.store.path), 'grants.json')
+  const grantsPath = join(dirname(config.store.path), 'server-grants.json')
+  const requestsPath = join(dirname(config.store.path), 'server-requests.json')
   const keysPath = join(dirname(config.store.path), 'server-keys.json')
   const { privateKey } = await loadOrGenerateKeyPair(keysPath)
 
@@ -203,7 +228,7 @@ export async function resolveService(config: AppConfig): Promise<Service> {
 
   const workflowEngine = new WorkflowEngine({ store, channel, config })
   const injector = new SecretInjector(grantManager, store)
-  const requestLog = new RequestLog()
+  const requestLog = new RequestLog(requestsPath)
   const startTime = Date.now()
 
   return new LocalService({

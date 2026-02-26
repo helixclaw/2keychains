@@ -14,7 +14,7 @@ const mockService = {
     resolve: vi.fn(),
   },
   requests: { create: vi.fn() },
-  grants: { validate: vi.fn() },
+  grants: { getStatus: vi.fn() },
   inject: vi.fn(),
 } as unknown as Service
 
@@ -114,6 +114,10 @@ describe('HTTP Server', () => {
   })
 
   describe('startServer', () => {
+    afterEach(() => {
+      vi.clearAllMocks()
+    })
+
     it('registers signal handlers and removes them on close', async () => {
       const originalListeners = {
         SIGINT: process.listenerCount('SIGINT'),

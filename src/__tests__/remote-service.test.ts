@@ -203,39 +203,20 @@ describe('RemoteService', () => {
   })
 
   describe('grants', () => {
-    it('validate() fetches signed grant and verifies JWS locally', async () => {
-      const fetchMock = mockFetchResponse(200, 'fake.jws.token')
+    it('getStatus() calls GET /api/grants/:requestId', async () => {
+      const statusResponse = { status: 'approved', jws: 'test.jws.token' }
+      const fetchMock = mockFetchResponse(200, statusResponse)
       globalThis.fetch = fetchMock
 
-      vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockResolvedValue({
-        grantId: 'grant-1',
-        requestId: 'req-1',
-        secretUuids: ['uuid-1'],
-        expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      })
-
       const service = new RemoteService(makeConfig())
-      const result = await service.grants.validate('req-1')
+      const result = await service.grants.getStatus('req-1')
 
-      expect(result).toBe(true)
+      expect(result.status).toBe('approved')
+      expect(result.jws).toBe('test.jws.token')
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://127.0.0.1:2274/api/grants/req-1/signed',
+        'http://127.0.0.1:2274/api/grants/req-1',
         expect.objectContaining({ method: 'GET' }),
       )
-    })
-
-    it('validate() returns false when JWS verification fails', async () => {
-      const fetchMock = mockFetchResponse(200, 'bad.jws.token')
-      globalThis.fetch = fetchMock
-
-      vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockRejectedValue(
-        new Error('Invalid grant signature'),
-      )
-
-      const service = new RemoteService(makeConfig())
-      const result = await service.grants.validate('req-1')
-
-      expect(result).toBe(false)
     })
   })
 

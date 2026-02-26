@@ -147,7 +147,7 @@ export const routePlugin = fp(
       },
     )
 
-    // GET /api/grants/:requestId — validate grant status
+    // GET /api/grants/:requestId — get grant status
     fastify.get<{ Params: { requestId: string } }>(
       '/api/grants/:requestId',
       {
@@ -161,7 +161,7 @@ export const routePlugin = fp(
           },
         },
       },
-      async (request) => service.grants.validate(request.params.requestId).catch(handleError),
+      async (request) => service.grants.getStatus(request.params.requestId).catch(handleError),
     )
 
     // POST /api/inject — resolve secrets for injection

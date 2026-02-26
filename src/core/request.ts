@@ -1,6 +1,14 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
+import { dirname } from 'node:path'
 
-export type AccessRequestStatus = 'pending' | 'approved' | 'denied' | 'expired' | 'timeout'
+export type AccessRequestStatus =
+  | 'pending'
+  | 'approved'
+  | 'denied'
+  | 'expired'
+  | 'timeout'
+  | 'error'
 
 export interface AccessRequest {
   id: string
@@ -71,6 +79,12 @@ export function createAccessRequest(
 
 export class RequestLog {
   private requests: AccessRequest[] = []
+  private readonly filePath: string | null
+
+  constructor(filePath?: string) {
+    this.filePath = filePath ?? null
+    if (this.filePath) this.load()
+  }
 
   add(request: AccessRequest): void {
     this.requests.push(request)
@@ -90,5 +104,21 @@ export class RequestLog {
 
   get size(): number {
     return this.requests.length
+  }
+
+  save(): void {
+    if (!this.filePath) return
+    mkdirSync(dirname(this.filePath), { recursive: true })
+    writeFileSync(this.filePath, JSON.stringify(this.requests, null, 2), 'utf-8')
+    chmodSync(this.filePath, 0o600)
+  }
+
+  private load(): void {
+    try {
+      const data = JSON.parse(readFileSync(this.filePath!, 'utf-8')) as AccessRequest[]
+      this.requests = data
+    } catch {
+      // File absent or corrupted — start empty
+    }
   }
 }

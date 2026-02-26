@@ -1,9 +1,9 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID, sign } from 'node:crypto'
+import type { KeyObject } from 'node:crypto'
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import type { AccessRequest } from './request.js'
-import { signGrant } from './signed-grant.js'
 
 export interface AccessGrant {
   id: string
@@ -14,6 +14,7 @@ export interface AccessGrant {
   used: boolean
   revokedAt: string | null
   commandHash?: string
+  jws?: string
 }
 
 const DEFAULT_GRANTS_PATH = join(homedir(), '.2kc', 'grants.json')
@@ -21,16 +22,15 @@ const DEFAULT_GRANTS_PATH = join(homedir(), '.2kc', 'grants.json')
 export class GrantManager {
   private grants: Map<string, AccessGrant> = new Map()
   private readonly grantsFilePath: string
+  private readonly privateKey: KeyObject | undefined
 
-  constructor(
-    grantsFilePath: string = DEFAULT_GRANTS_PATH,
-    private readonly signingKey: CryptoKey | null = null,
-  ) {
+  constructor(grantsFilePath: string = DEFAULT_GRANTS_PATH, privateKey?: KeyObject) {
     this.grantsFilePath = grantsFilePath
+    this.privateKey = privateKey
     this.load()
   }
 
-  async createGrant(request: AccessRequest): Promise<{ grant: AccessGrant; jws: string | null }> {
+  createGrant(request: AccessRequest): { grant: AccessGrant; jws: string | undefined } {
     if (request.status !== 'approved') {
       throw new Error(`Cannot create grant for request with status: ${request.status}`)
     }
@@ -45,11 +45,14 @@ export class GrantManager {
       revokedAt: null,
       commandHash: request.commandHash,
     }
-    this.grants.set(grant.id, grant)
-    let jws: string | null = null
-    if (this.signingKey) {
-      jws = await signGrant(grant, this.signingKey)
+
+    let jws: string | undefined
+    if (this.privateKey) {
+      jws = signGrant(grant, this.privateKey)
+      grant.jws = jws
     }
+
+    this.grants.set(grant.id, grant)
     this.save()
     return { grant, jws }
   }
@@ -132,4 +135,15 @@ export class GrantManager {
     writeFileSync(this.grantsFilePath, JSON.stringify(grants, null, 2), 'utf-8')
     chmodSync(this.grantsFilePath, 0o600)
   }
+}
+
+function signGrant(grant: AccessGrant, privateKey: KeyObject): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'EdDSA' })).toString('base64url')
+  // Omit the jws field so the signature doesn't cover itself
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { jws: _, ...grantWithoutJws } = grant
+  const payload = Buffer.from(JSON.stringify(grantWithoutJws)).toString('base64url')
+  const signingInput = `${header}.${payload}`
+  const sigBytes = sign(null, Buffer.from(signingInput), privateKey)
+  return `${signingInput}.${sigBytes.toString('base64url')}`
 }

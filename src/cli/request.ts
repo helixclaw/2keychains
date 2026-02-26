@@ -44,9 +44,22 @@ const request = new Command('request')
           opts.cmd,
         )
 
-        // 4. Validate grant
-        const isValid = await service.grants.validate(accessRequest.id)
-        if (!isValid) {
+        // 4. Poll for grant status
+        const pollIntervalMs = 250
+        const maxWaitMs = 5 * 60 * 1000 // 5 minutes
+        const deadline = Date.now() + maxWaitMs
+        let grantResult!: Awaited<ReturnType<typeof service.grants.getStatus>>
+        while (true) {
+          grantResult = await service.grants.getStatus(accessRequest.id)
+          if (grantResult.status !== 'pending') break
+          if (Date.now() > deadline) {
+            console.error(`Timed out waiting for approval: ${uuids.join(', ')}`)
+            process.exitCode = 1
+            return
+          }
+          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+        }
+        if (grantResult.status !== 'approved') {
           console.error(`Access request denied: ${uuids.join(', ')}`)
           process.exitCode = 1
           return

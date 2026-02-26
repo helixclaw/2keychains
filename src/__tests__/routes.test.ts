@@ -2,11 +2,25 @@
 
 import { createServer } from '../server/app.js'
 import type { Service } from '../core/service.js'
+import type { AccessGrant } from '../core/grant.js'
 
 const TEST_TOKEN = 'test-token'
 const authHeaders = { Authorization: `Bearer ${TEST_TOKEN}` }
 const TEST_UUID = '550e8400-e29b-41d4-a716-446655440000'
 const MISSING_UUID = '550e8400-e29b-41d4-a716-446655440001'
+
+function makeGrantMock(overrides?: Partial<AccessGrant>): AccessGrant {
+  return {
+    id: 'grant-id',
+    requestId: 'req-123',
+    secretUuids: ['secret-uuid'],
+    grantedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    used: false,
+    revokedAt: null,
+    ...overrides,
+  }
+}
 
 function makeMockService(): Service {
   return {
@@ -30,7 +44,11 @@ function makeMockService(): Service {
       }),
     },
     grants: {
-      validate: vi.fn().mockResolvedValue(true),
+      getStatus: vi.fn().mockResolvedValue({
+        status: 'approved',
+        grant: makeGrantMock(),
+        jws: 'test.jws.token',
+      }),
     },
     inject: vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'output', stderr: '' }),
   } as unknown as Service
@@ -279,7 +297,7 @@ describe('API Routes', () => {
   })
 
   describe('GET /api/grants/:requestId', () => {
-    it('returns 200 with boolean result', async () => {
+    it('returns 200 with grant status', async () => {
       const service = makeMockService()
       const server = createServer(service, TEST_TOKEN)
       const response = await server.inject({
@@ -289,8 +307,27 @@ describe('API Routes', () => {
       })
 
       expect(response.statusCode).toBe(200)
-      expect(JSON.parse(response.body)).toBe(true)
-      expect(service.grants.validate).toHaveBeenCalledWith('req-123')
+      const body = JSON.parse(response.body)
+      expect(body.status).toBe('approved')
+      expect(body.jws).toBe('test.jws.token')
+      expect(service.grants.getStatus).toHaveBeenCalledWith('req-123')
+
+      await server.close()
+    })
+
+    it('returns 404 when request not found', async () => {
+      const service = makeMockService()
+      ;(service.grants.getStatus as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('Request not found: unknown'),
+      )
+      const server = createServer(service, TEST_TOKEN)
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/grants/unknown',
+        headers: authHeaders,
+      })
+
+      expect(response.statusCode).toBe(404)
 
       await server.close()
     })

@@ -7,13 +7,14 @@ import type { Service } from '../core/service.js'
 const mockLoadConfig = vi.fn<() => AppConfig>()
 
 const mockRequestsCreate = vi.fn<Service['requests']['create']>()
-const mockGrantsValidate = vi.fn<Service['grants']['validate']>()
+const mockGrantsGetStatus = vi.fn<Service['grants']['getStatus']>()
 const mockInject = vi.fn<Service['inject']>()
 const mockHealth = vi.fn<Service['health']>()
 const mockSecretsList = vi.fn<Service['secrets']['list']>()
 const mockSecretsAdd = vi.fn<Service['secrets']['add']>()
 const mockSecretsRemove = vi.fn<Service['secrets']['remove']>()
 const mockSecretsGetMetadata = vi.fn<Service['secrets']['getMetadata']>()
+const mockSecretsResolve = vi.fn<Service['secrets']['resolve']>()
 
 const mockService: Service = {
   health: mockHealth,
@@ -22,12 +23,13 @@ const mockService: Service = {
     add: mockSecretsAdd,
     remove: mockSecretsRemove,
     getMetadata: mockSecretsGetMetadata,
+    resolve: mockSecretsResolve,
   },
   requests: {
     create: mockRequestsCreate,
   },
   grants: {
-    validate: mockGrantsValidate,
+    getStatus: mockGrantsGetStatus,
   },
   inject: mockInject,
 }
@@ -55,6 +57,7 @@ function createTestConfig(): AppConfig {
     requireApproval: {},
     defaultRequireApproval: false,
     approvalTimeoutMs: 300_000,
+    unlock: { ttlMs: 900_000 },
   }
 }
 
@@ -98,7 +101,7 @@ describe('request command orchestration', () => {
     mockLoadConfig.mockReturnValue(createTestConfig())
     mockResolveService.mockReturnValue(mockService)
     mockRequestsCreate.mockResolvedValue(createTestAccessRequest())
-    mockGrantsValidate.mockResolvedValue(true)
+    mockGrantsGetStatus.mockResolvedValue({ status: 'approved' })
     mockInject.mockResolvedValue({ exitCode: 0, stdout: 'output', stderr: '' })
   })
 
@@ -107,7 +110,7 @@ describe('request command orchestration', () => {
     vi.clearAllMocks()
   })
 
-  it('happy path: approved request -> validate grant -> inject -> returns child exit code', async () => {
+  it('happy path: approved request -> poll status -> inject -> returns child exit code', async () => {
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     await runRequest()
 
@@ -120,7 +123,7 @@ describe('request command orchestration', () => {
       300,
       'echo hello',
     )
-    expect(mockGrantsValidate).toHaveBeenCalledWith('test-request-id')
+    expect(mockGrantsGetStatus).toHaveBeenCalledWith('test-request-id')
     expect(mockInject).toHaveBeenCalledWith('test-request-id', 'echo hello', {
       envVarName: 'MY_SECRET',
     })
@@ -129,8 +132,8 @@ describe('request command orchestration', () => {
     stdoutSpy.mockRestore()
   })
 
-  it('denied request (grant not valid): exits with code 1', async () => {
-    mockGrantsValidate.mockResolvedValue(false)
+  it('denied request (status denied): exits with code 1', async () => {
+    mockGrantsGetStatus.mockResolvedValue({ status: 'denied' })
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     await runRequest()
 
@@ -266,6 +269,45 @@ describe('request command orchestration', () => {
     await runRequest()
 
     expect(process.exitCode).toBe(1)
+  })
+
+  it('times out while polling if deadline passes before approval', async () => {
+    const baseTime = 1_000_000
+    const nowSpy = vi
+      .spyOn(Date, 'now')
+      .mockReturnValueOnce(baseTime) // used to compute deadline
+      .mockReturnValue(baseTime + 5 * 60 * 1000 + 1) // always past deadline
+
+    mockGrantsGetStatus.mockResolvedValue({ status: 'pending' })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await runRequest()
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Timed out'))
+    expect(process.exitCode).toBe(1)
+    expect(mockInject).not.toHaveBeenCalled()
+
+    nowSpy.mockRestore()
+    errorSpy.mockRestore()
+  })
+
+  it('polls again after delay when status is pending then becomes approved', async () => {
+    vi.useFakeTimers()
+    mockGrantsGetStatus
+      .mockResolvedValueOnce({ status: 'pending' })
+      .mockResolvedValueOnce({ status: 'approved' })
+
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+
+    const runPromise = runRequest()
+    await vi.runAllTimersAsync()
+    await runPromise
+
+    expect(mockGrantsGetStatus).toHaveBeenCalledTimes(2)
+    expect(process.exitCode).toBe(0)
+
+    stdoutSpy.mockRestore()
+    vi.useRealTimers()
   })
 
   it('runs without --env flag (placeholder-only mode)', async () => {

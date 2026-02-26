@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import type { ServerConfig } from './config.js'
 import type { Service, SecretSummary } from './service.js'
 import type { SecretMetadata, ProcessResult } from './types.js'
-import type { AccessRequest } from './request.js'
+import type { AccessRequest, AccessRequestStatus } from './request.js'
+import type { AccessGrant } from './grant.js'
 import type { UnlockSession } from './unlock-session.js'
 import type { SecretInjector } from './injector.js'
 import { GrantVerifier } from './grant-verifier.js'
@@ -163,18 +164,11 @@ export class RemoteService implements Service {
   }
 
   grants: Service['grants'] = {
-    validate: async (requestId: string) => {
-      const jwsToken = await this.request<string>(
+    getStatus: (requestId: string) =>
+      this.request<{ status: AccessRequestStatus; grant?: AccessGrant; jws?: string }>(
         'GET',
-        `/api/grants/${encodeURIComponent(requestId)}/signed`,
-      )
-      try {
-        await this.grantVerifier.verifyGrant(jwsToken)
-        return true
-      } catch {
-        return false
-      }
-    },
+        `/api/grants/${encodeURIComponent(requestId)}`,
+      ),
   }
 
   async inject(

@@ -1,50 +1,71 @@
-import { generateKeyPair, exportJWK, importJWK } from 'jose'
+import { generateKeyPairSync, createPublicKey, createPrivateKey } from 'node:crypto'
+import type { KeyObject } from 'node:crypto'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-interface KeysFile {
-  publicKey: JsonWebKey
-  privateKey: JsonWebKey
+interface KeysFileDer {
+  publicKey: { type: string; data: string }
+  privateKey: { type: string; data: string }
 }
 
 export interface ServerKeys {
-  publicKey: CryptoKey
-  privateKey: CryptoKey
+  publicKey: KeyObject
+  privateKey: KeyObject
 }
 
-function isEdDSAJwk(key: unknown): key is JsonWebKey {
-  return (
-    key !== null &&
-    typeof key === 'object' &&
-    (key as Record<string, unknown>).kty === 'OKP' &&
-    (key as Record<string, unknown>).crv === 'Ed25519'
-  )
+function isValidDerKeysFile(parsed: unknown): parsed is KeysFileDer {
+  if (typeof parsed !== 'object' || parsed === null) return false
+  const obj = parsed as Record<string, unknown>
+  if (typeof obj.publicKey !== 'object' || obj.publicKey === null) return false
+  if (typeof obj.privateKey !== 'object' || obj.privateKey === null) return false
+  const pub = obj.publicKey as Record<string, unknown>
+  const priv = obj.privateKey as Record<string, unknown>
+  return typeof pub.data === 'string' && typeof priv.data === 'string'
 }
 
 export async function loadOrGenerateKeyPair(keyFilePath: string): Promise<ServerKeys> {
   try {
     const raw = readFileSync(keyFilePath, 'utf-8')
-    const keysFile = JSON.parse(raw) as KeysFile
-    if (!isEdDSAJwk(keysFile.publicKey) || !isEdDSAJwk(keysFile.privateKey)) {
-      throw new Error('Key file contains invalid key format: expected Ed25519 OKP keys')
+    const parsed = JSON.parse(raw) as unknown
+    if (isValidDerKeysFile(parsed)) {
+      const publicKey = createPublicKey({
+        key: Buffer.from(parsed.publicKey.data, 'base64'),
+        format: 'der',
+        type: 'spki',
+      })
+      const privateKey = createPrivateKey({
+        key: Buffer.from(parsed.privateKey.data, 'base64'),
+        format: 'der',
+        type: 'pkcs8',
+      })
+      return { publicKey, privateKey }
     }
-    const publicKey = await importJWK(keysFile.publicKey, 'EdDSA')
-    const privateKey = await importJWK(keysFile.privateKey, 'EdDSA')
-    return { publicKey: publicKey as CryptoKey, privateKey: privateKey as CryptoKey }
+    // Key file exists but is in an unrecognized format — regenerate
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw err
+      // File exists but is corrupted (parse error, etc.) — regenerate
+      if (!(err instanceof SyntaxError)) {
+        throw err
+      }
     }
   }
 
-  const { publicKey, privateKey } = await generateKeyPair('EdDSA', { extractable: true })
-  const publicJwk = await exportJWK(publicKey)
-  const privateJwk = await exportJWK(privateKey)
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519')
+
+  const publicDer = publicKey.export({ format: 'der', type: 'spki' })
+  const privateDer = privateKey.export({ format: 'der', type: 'pkcs8' })
 
   mkdirSync(dirname(keyFilePath), { recursive: true })
   writeFileSync(
     keyFilePath,
-    JSON.stringify({ publicKey: publicJwk, privateKey: privateJwk }, null, 2),
+    JSON.stringify(
+      {
+        publicKey: { type: 'spki', data: publicDer.toString('base64') },
+        privateKey: { type: 'pkcs8', data: privateDer.toString('base64') },
+      },
+      null,
+      2,
+    ),
     { encoding: 'utf-8', mode: 0o600 },
   )
 

@@ -195,16 +195,18 @@ describe('loadOrGenerateKeyPair', () => {
     expect(payload.secretUuids).toEqual(grant.secretUuids)
   })
 
-  it('throws with clear error when key file contains invalid JSON', async () => {
+  it('regenerates keys when key file contains invalid JSON', async () => {
     const keyPath = tempKeyPath()
     // Write invalid JSON to the key file
     mkdirSync(dirname(keyPath), { recursive: true })
     writeFileSync(keyPath, 'not valid json', 'utf-8')
 
-    await expect(loadOrGenerateKeyPair(keyPath)).rejects.toThrow()
+    const keys = await loadOrGenerateKeyPair(keyPath)
+    expect(keys.publicKey).toBeDefined()
+    expect(keys.privateKey).toBeDefined()
   })
 
-  it('throws when key file contains valid JSON but wrong key format', async () => {
+  it('regenerates keys when key file contains valid JSON but wrong key format', async () => {
     const keyPath = tempKeyPath()
     mkdirSync(dirname(keyPath), { recursive: true })
     writeFileSync(
@@ -216,9 +218,9 @@ describe('loadOrGenerateKeyPair', () => {
       'utf-8',
     )
 
-    await expect(loadOrGenerateKeyPair(keyPath)).rejects.toThrow(
-      'Key file contains invalid key format',
-    )
+    const keys = await loadOrGenerateKeyPair(keyPath)
+    expect(keys.publicKey).toBeDefined()
+    expect(keys.privateKey).toBeDefined()
   })
 })
 
