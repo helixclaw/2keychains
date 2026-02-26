@@ -56,7 +56,7 @@ secrets
       process.exitCode = 1
       return
     }
-    const service = resolveService(loadConfig())
+    const service = await resolveService(loadConfig())
     const result = await service.secrets.add(opts.ref, value, opts.tags)
     console.log(result.uuid)
   })
@@ -66,7 +66,7 @@ secrets
   .description('List all secrets (UUIDs, refs, and tags)')
   .action(async () => {
     try {
-      const service = resolveService(loadConfig())
+      const service = await resolveService(loadConfig())
       const items = await service.secrets.list()
       console.log(JSON.stringify(items, null, 2))
     } catch (err: unknown) {
@@ -81,7 +81,7 @@ secrets
   .argument('<refOrUuid>', 'Ref or UUID of the secret to remove')
   .action(async (refOrUuid: string) => {
     try {
-      const service = resolveService(loadConfig())
+      const service = await resolveService(loadConfig())
       const metadata = await service.secrets.resolve(refOrUuid)
       await service.secrets.remove(metadata.uuid)
       console.log('Removed')

@@ -11,6 +11,7 @@ import { GrantManager } from './grant.js'
 import { WorkflowEngine } from './workflow.js'
 import { SecretInjector } from './injector.js'
 import { DiscordChannel } from '../channels/discord.js'
+import { loadOrGenerateKeyPair } from './key-manager.js'
 
 // SecretSummary aliases existing SecretListItem shape
 export type SecretSummary = SecretListItem
@@ -116,7 +117,7 @@ export class LocalService implements Service {
       this.deps.requestLog.add(request)
       const outcome = await this.deps.workflowEngine.processRequest(request)
       if (outcome === 'approved') {
-        this.deps.grantManager.createGrant(request)
+        await this.deps.grantManager.createGrant(request)
       }
       return request
     },
@@ -146,16 +147,18 @@ export class LocalService implements Service {
   }
 }
 
-export function resolveService(config: AppConfig): Service {
+export async function resolveService(config: AppConfig): Promise<Service> {
   if (config.mode === 'client') {
     return new RemoteService(config.server)
   }
 
   const grantsPath = join(dirname(config.store.path), 'grants.json')
+  const keysPath = join(dirname(config.store.path), 'server-keys.json')
+  const { privateKey } = await loadOrGenerateKeyPair(keysPath)
 
   const store = new EncryptedSecretStore(config.store.path)
   const unlockSession = new UnlockSession(config.unlock)
-  const grantManager = new GrantManager(grantsPath)
+  const grantManager = new GrantManager(grantsPath, privateKey)
 
   let channel: NotificationChannel
   if (config.discord) {

@@ -25,44 +25,44 @@ function makePendingRequest(durationSeconds = 300) {
 
 describe('GrantManager', () => {
   describe('createGrant', () => {
-    it('creates a grant with a UUID id', () => {
+    it('creates a grant with a UUID id', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       expect(grant.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
     })
 
-    it('sets requestId to request.id', () => {
+    it('sets requestId to request.id', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       expect(grant.requestId).toBe(request.id)
     })
 
-    it('sets secretUuids from request.secretUuids', () => {
+    it('sets secretUuids from request.secretUuids', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       expect(grant.secretUuids).toEqual(request.secretUuids)
     })
 
-    it('sets used to false and revokedAt to null', () => {
+    it('sets used to false and revokedAt to null', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       expect(grant.used).toBe(false)
       expect(grant.revokedAt).toBeNull()
     })
 
-    it('throws if request is not approved', () => {
+    it('throws if request is not approved', async () => {
       const manager = new GrantManager()
       const request = makePendingRequest()
 
-      expect(() => manager.createGrant(request)).toThrow(
+      await expect(manager.createGrant(request)).rejects.toThrow(
         'Cannot create grant for request with status: pending',
       )
     })
@@ -77,25 +77,25 @@ describe('GrantManager', () => {
         vi.useRealTimers()
       })
 
-      it('sets grantedAt to current ISO timestamp', () => {
+      it('sets grantedAt to current ISO timestamp', async () => {
         const manager = new GrantManager()
         const request = makeApprovedRequest()
-        const grant = manager.createGrant(request)
+        const { grant } = await manager.createGrant(request)
 
         expect(grant.grantedAt).toBe('2026-01-15T10:00:00.000Z')
       })
 
-      it('sets expiresAt to grantedAt + durationSeconds', () => {
+      it('sets expiresAt to grantedAt + durationSeconds', async () => {
         const manager = new GrantManager()
         const request = makeApprovedRequest(300)
-        const grant = manager.createGrant(request)
+        const { grant } = await manager.createGrant(request)
 
         expect(grant.expiresAt).toBe('2026-01-15T10:05:00.000Z')
       })
     })
 
     describe('batch', () => {
-      it('copies secretUuids array from request', () => {
+      it('copies secretUuids array from request', async () => {
         const manager = new GrantManager()
         const request = createAccessRequest(
           ['uuid-1', 'uuid-2', 'uuid-3'],
@@ -103,17 +103,17 @@ describe('GrantManager', () => {
           'TASK-1',
         )
         request.status = 'approved'
-        const grant = manager.createGrant(request)
+        const { grant } = await manager.createGrant(request)
 
         expect(grant.secretUuids).toEqual(['uuid-1', 'uuid-2', 'uuid-3'])
       })
 
-      it('preserves all UUIDs in the array', () => {
+      it('preserves all UUIDs in the array', async () => {
         const manager = new GrantManager()
         const uuids = ['a', 'b', 'c', 'd', 'e']
         const request = createAccessRequest(uuids, 'batch access', 'TASK-1')
         request.status = 'approved'
-        const grant = manager.createGrant(request)
+        const { grant } = await manager.createGrant(request)
 
         expect(grant.secretUuids).toHaveLength(5)
         expect(grant.secretUuids).toEqual(uuids)
@@ -122,10 +122,10 @@ describe('GrantManager', () => {
   })
 
   describe('validateGrant', () => {
-    it('returns true for valid, unexpired, unused, unrevoked grant', () => {
+    it('returns true for valid, unexpired, unused, unrevoked grant', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       expect(manager.validateGrant(grant.id)).toBe(true)
     })
@@ -136,20 +136,20 @@ describe('GrantManager', () => {
       expect(manager.validateGrant('nonexistent')).toBe(false)
     })
 
-    it('returns false for used grant', () => {
+    it('returns false for used grant', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       manager.markUsed(grant.id)
 
       expect(manager.validateGrant(grant.id)).toBe(false)
     })
 
-    it('returns false for revoked grant', () => {
+    it('returns false for revoked grant', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       manager.revokeGrant(grant.id)
 
@@ -166,10 +166,10 @@ describe('GrantManager', () => {
         vi.useRealTimers()
       })
 
-      it('returns false for expired grant', () => {
+      it('returns false for expired grant', async () => {
         const manager = new GrantManager()
         const request = makeApprovedRequest(300)
-        const grant = manager.createGrant(request)
+        const { grant } = await manager.createGrant(request)
 
         // Advance past expiry
         vi.setSystemTime(new Date('2026-01-15T10:05:00.001Z'))
@@ -180,10 +180,10 @@ describe('GrantManager', () => {
   })
 
   describe('markUsed', () => {
-    it('marks grant as used', () => {
+    it('marks grant as used', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       manager.markUsed(grant.id)
 
@@ -197,20 +197,20 @@ describe('GrantManager', () => {
       expect(() => manager.markUsed('nonexistent')).toThrow('Grant not found: nonexistent')
     })
 
-    it('throws if grant already used', () => {
+    it('throws if grant already used', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       manager.markUsed(grant.id)
 
       expect(() => manager.markUsed(grant.id)).toThrow(`Grant is not valid: ${grant.id}`)
     })
 
-    it('throws if grant revoked', () => {
+    it('throws if grant revoked', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       manager.revokeGrant(grant.id)
 
@@ -227,10 +227,10 @@ describe('GrantManager', () => {
         vi.useRealTimers()
       })
 
-      it('throws if grant expired', () => {
+      it('throws if grant expired', async () => {
         const manager = new GrantManager()
         const request = makeApprovedRequest(300)
-        const grant = manager.createGrant(request)
+        const { grant } = await manager.createGrant(request)
 
         vi.setSystemTime(new Date('2026-01-15T10:05:00.001Z'))
 
@@ -246,10 +246,10 @@ describe('GrantManager', () => {
       expect(() => manager.revokeGrant('nonexistent')).toThrow('Grant not found: nonexistent')
     })
 
-    it('throws if grant already revoked', () => {
+    it('throws if grant already revoked', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       manager.revokeGrant(grant.id)
 
@@ -266,10 +266,10 @@ describe('GrantManager', () => {
         vi.useRealTimers()
       })
 
-      it('sets revokedAt timestamp', () => {
+      it('sets revokedAt timestamp', async () => {
         const manager = new GrantManager()
         const request = makeApprovedRequest()
-        const grant = manager.createGrant(request)
+        const { grant } = await manager.createGrant(request)
 
         vi.setSystemTime(new Date('2026-01-15T10:01:00.000Z'))
         manager.revokeGrant(grant.id)
@@ -297,10 +297,10 @@ describe('GrantManager', () => {
         vi.useRealTimers()
       })
 
-      it('removes expired grants from memory', () => {
+      it('removes expired grants from memory', async () => {
         const manager = new GrantManager()
         const request = makeApprovedRequest(300)
-        const grant = manager.createGrant(request)
+        const { grant } = await manager.createGrant(request)
 
         vi.setSystemTime(new Date('2026-01-15T10:05:00.001Z'))
         manager.cleanup()
@@ -308,10 +308,10 @@ describe('GrantManager', () => {
         expect(manager.getGrant(grant.id)).toBeUndefined()
       })
 
-      it('keeps unexpired grants', () => {
+      it('keeps unexpired grants', async () => {
         const manager = new GrantManager()
         const request = makeApprovedRequest(300)
-        const grant = manager.createGrant(request)
+        const { grant } = await manager.createGrant(request)
 
         vi.setSystemTime(new Date('2026-01-15T10:04:00.000Z'))
         manager.cleanup()
@@ -322,10 +322,10 @@ describe('GrantManager', () => {
   })
 
   describe('getGrant', () => {
-    it('returns a copy of the grant', () => {
+    it('returns a copy of the grant', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       const retrieved = manager.getGrant(grant.id)
       expect(retrieved).toEqual(grant)
@@ -345,10 +345,10 @@ describe('GrantManager', () => {
   })
 
   describe('getGrantByRequestId', () => {
-    it('returns grant matching the requestId', () => {
+    it('returns grant matching the requestId', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       const found = manager.getGrantByRequestId(request.id)
       expect(found).toBeDefined()
@@ -356,10 +356,10 @@ describe('GrantManager', () => {
       expect(found!.requestId).toBe(request.id)
     })
 
-    it('returns a copy (not the original)', () => {
+    it('returns a copy (not the original)', async () => {
       const manager = new GrantManager()
       const request = makeApprovedRequest()
-      manager.createGrant(request)
+      await manager.createGrant(request)
 
       const found = manager.getGrantByRequestId(request.id)
       if (found) {
@@ -376,11 +376,11 @@ describe('GrantManager', () => {
   })
 
   describe('getGrantSecrets', () => {
-    it('returns secretUuids array for valid grant', () => {
+    it('returns secretUuids array for valid grant', async () => {
       const manager = new GrantManager()
       const request = createAccessRequest(['uuid-1', 'uuid-2'], 'reason', 'TASK-1')
       request.status = 'approved'
-      const grant = manager.createGrant(request)
+      const { grant } = await manager.createGrant(request)
 
       const secrets = manager.getGrantSecrets(grant.id)
       expect(secrets).toEqual(['uuid-1', 'uuid-2'])

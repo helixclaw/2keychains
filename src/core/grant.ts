@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import type { AccessRequest } from './request.js'
+import { signGrant } from './signed-grant.js'
 
 export interface AccessGrant {
   id: string
@@ -20,12 +21,15 @@ export class GrantManager {
   private grants: Map<string, AccessGrant> = new Map()
   private readonly grantsFilePath: string
 
-  constructor(grantsFilePath: string = DEFAULT_GRANTS_PATH) {
+  constructor(
+    grantsFilePath: string = DEFAULT_GRANTS_PATH,
+    private readonly signingKey: CryptoKey | null = null,
+  ) {
     this.grantsFilePath = grantsFilePath
     this.load()
   }
 
-  createGrant(request: AccessRequest): AccessGrant {
+  async createGrant(request: AccessRequest): Promise<{ grant: AccessGrant; jws: string | null }> {
     if (request.status !== 'approved') {
       throw new Error(`Cannot create grant for request with status: ${request.status}`)
     }
@@ -40,8 +44,12 @@ export class GrantManager {
       revokedAt: null,
     }
     this.grants.set(grant.id, grant)
+    let jws: string | null = null
+    if (this.signingKey) {
+      jws = await signGrant(grant, this.signingKey)
+    }
     this.save()
-    return grant
+    return { grant, jws }
   }
 
   validateGrant(grantId: string): boolean {

@@ -12,40 +12,40 @@ import type { SecretInjector } from '../core/injector.js'
 import type { RequestLog } from '../core/request.js'
 
 describe('resolveService', () => {
-  it('returns LocalService for standalone mode', () => {
+  it('returns LocalService for standalone mode', async () => {
     const config = defaultConfig()
-    const service = resolveService(config)
+    const service = await resolveService(config)
     expect(service).toBeInstanceOf(LocalService)
   })
 
-  it('returns RemoteService for client mode', () => {
+  it('returns RemoteService for client mode', async () => {
     const config = {
       ...defaultConfig(),
       mode: 'client' as const,
       server: { host: '127.0.0.1', port: 2274, authToken: 'test-token' },
     }
-    const service = resolveService(config)
+    const service = await resolveService(config)
     expect(service).toBeInstanceOf(RemoteService)
   })
 
-  it('throws when defaultRequireApproval is true and discord not configured', () => {
+  it('throws when defaultRequireApproval is true and discord not configured', async () => {
     const config = { ...defaultConfig(), defaultRequireApproval: true }
-    expect(() => resolveService(config)).toThrow(
+    await expect(resolveService(config)).rejects.toThrow(
       'Discord must be configured when defaultRequireApproval is true',
     )
   })
 
-  it('creates a noop channel when discord is not configured and approval not required', () => {
+  it('creates a noop channel when discord is not configured and approval not required', async () => {
     const config = {
       ...defaultConfig(),
       defaultRequireApproval: false,
       discord: undefined,
     }
-    const service = resolveService(config)
+    const service = await resolveService(config)
     expect(service).toBeInstanceOf(LocalService)
   })
 
-  it('creates LocalService with discord channel when discord is configured', () => {
+  it('creates LocalService with discord channel when discord is configured', async () => {
     const config = {
       ...defaultConfig(),
       discord: {
@@ -54,7 +54,7 @@ describe('resolveService', () => {
         channelId: '999888777',
       },
     }
-    const service = resolveService(config)
+    const service = await resolveService(config)
     expect(service).toBeInstanceOf(LocalService)
   })
 })
@@ -100,7 +100,7 @@ function makeService() {
   const grantManager = {
     getGrantByRequestId: vi.fn().mockReturnValue(makeGrantMock()),
     validateGrant: vi.fn().mockReturnValue(true),
-    createGrant: vi.fn().mockReturnValue(makeGrantMock()),
+    createGrant: vi.fn().mockResolvedValue({ grant: makeGrantMock(), jws: null }),
   } as unknown as GrantManager
 
   const workflowEngine = {

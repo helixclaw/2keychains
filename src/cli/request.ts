@@ -25,7 +25,7 @@ const request = new Command('request')
       try {
         // 1. Load config and resolve service
         const config = loadConfig()
-        const service = resolveService(config)
+        const service = await resolveService(config)
 
         // 2. Parse and validate duration
         const durationSeconds = parseInt(opts.duration, 10)

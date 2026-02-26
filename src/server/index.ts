@@ -4,7 +4,7 @@ import { startServer } from './app.js'
 
 try {
   const config = loadConfig()
-  const service = resolveService(config)
+  const service = await resolveService(config)
   await startServer(config, service)
 } catch (error) {
   console.error('Failed to start server:', error instanceof Error ? error.message : error)
