@@ -21,7 +21,7 @@ const mockService = {
 describe('HTTP Server', () => {
   const config = {
     ...defaultConfig(),
-    server: { host: '127.0.0.1', port: 0 },
+    server: { host: '127.0.0.1', port: 0, authToken: 'test-token' },
   }
 
   describe('GET /health', () => {
@@ -120,7 +120,7 @@ describe('HTTP Server', () => {
         SIGTERM: process.listenerCount('SIGTERM'),
       }
 
-      const server = await startServer(config, mockService, 'test-token')
+      const server = await startServer(config, mockService)
 
       // Signal handlers should have been added
       expect(process.listenerCount('SIGINT')).toBe(originalListeners.SIGINT + 1)
@@ -134,7 +134,7 @@ describe('HTTP Server', () => {
     })
 
     it('returns a listening server', async () => {
-      const server = await startServer(config, mockService, 'test-token')
+      const server = await startServer(config, mockService)
 
       const response = await server.inject({ method: 'GET', url: '/health' })
       expect(response.statusCode).toBe(200)
@@ -145,7 +145,7 @@ describe('HTTP Server', () => {
     it('closes the server and exits on SIGINT', async () => {
       const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never)
 
-      await startServer(config, mockService, 'test-token')
+      await startServer(config, mockService)
 
       process.emit('SIGINT')
 

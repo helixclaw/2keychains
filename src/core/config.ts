@@ -12,6 +12,7 @@ export interface ServerConfig {
   host: string
   port: number
   authToken?: string
+  sessionTtlMs?: number
 }
 
 export interface StoreConfig {
@@ -107,6 +108,13 @@ function parseServerConfig(raw: unknown): ServerConfig {
       throw new Error('server.authToken must be a non-empty string when provided')
     }
     result.authToken = raw.authToken
+  }
+
+  if (raw.sessionTtlMs !== undefined) {
+    if (typeof raw.sessionTtlMs !== 'number' || raw.sessionTtlMs < 1000) {
+      throw new Error('server.sessionTtlMs must be at least 1000ms')
+    }
+    result.sessionTtlMs = raw.sessionTtlMs
   }
 
   return result

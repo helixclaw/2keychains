@@ -313,6 +313,28 @@ describe('parseConfig', () => {
     expect(() => parseConfig({ server: 'bad' })).toThrow('server must be an object')
   })
 
+  it('parses server.sessionTtlMs when provided', () => {
+    const config = parseConfig({ server: { sessionTtlMs: 1800000 } })
+    expect(config.server.sessionTtlMs).toBe(1800000)
+  })
+
+  it('defaults server.sessionTtlMs to undefined (applied at runtime)', () => {
+    const config = parseConfig({})
+    expect(config.server.sessionTtlMs).toBeUndefined()
+  })
+
+  it('throws on server.sessionTtlMs below minimum (1000ms)', () => {
+    expect(() => parseConfig({ server: { sessionTtlMs: 0 } })).toThrow(
+      'server.sessionTtlMs must be at least 1000ms',
+    )
+    expect(() => parseConfig({ server: { sessionTtlMs: -1 } })).toThrow(
+      'server.sessionTtlMs must be at least 1000ms',
+    )
+    expect(() => parseConfig({ server: { sessionTtlMs: 999 } })).toThrow(
+      'server.sessionTtlMs must be at least 1000ms',
+    )
+  })
+
   it('throws if server.host is empty string', () => {
     expect(() => parseConfig({ server: { host: '' } })).toThrow(
       'server.host must be a non-empty string',
