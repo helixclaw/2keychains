@@ -7,11 +7,15 @@ import type { Service } from '../core/service.js'
 import { bearerAuthPlugin } from './auth.js'
 import { routePlugin } from './routes.js'
 
-export function createServer(service: Service, authToken: string): FastifyInstance {
+export function createServer(
+  service: Service,
+  authToken: string,
+  opts?: { sessionTtlMs?: number },
+): FastifyInstance {
   // sessionSecret is regenerated per server instance — sessions intentionally
   // invalidate on server restart (ephemeral by design).
   const sessionSecret = randomBytes(32)
-  const sessionTtlMs = 3_600_000
+  const sessionTtlMs = opts?.sessionTtlMs ?? 3_600_000
 
   const server = Fastify({
     logger: {
