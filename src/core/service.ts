@@ -168,7 +168,12 @@ export class LocalService implements Service {
 
 export async function resolveService(config: AppConfig): Promise<Service> {
   if (config.mode === 'client') {
-    return new RemoteService(config.server)
+    const store = new EncryptedSecretStore(config.store.path)
+    const unlockSession = new UnlockSession(config.unlock)
+    const grantsPath = join(dirname(config.store.path), 'grants.json')
+    const grantManager = new GrantManager(grantsPath)
+    const injector = new SecretInjector(grantManager, store)
+    return new RemoteService(config.server, { unlockSession, injector })
   }
 
   const grantsPath = join(dirname(config.store.path), 'grants.json')
