@@ -3,25 +3,21 @@ import { Command } from 'commander'
 import { loadConfig } from '../core/config.js'
 import { resolveService } from '../core/service.js'
 
-const request = new Command('request')
-  .description('Request access to one or more secrets and inject into a command')
-  .argument('<ref...>', 'Secret refs or UUIDs to access')
+const inject = new Command('inject')
+  .description('Run a command with secrets injected by scanning env vars for 2k:// placeholders')
   .requiredOption('--reason <reason>', 'Justification for access')
   .requiredOption('--task <taskRef>', 'Task reference (e.g., ticket ID)')
   .option('--duration <seconds>', 'Grant duration in seconds', '300')
-  .option('--env <varName>', 'Environment variable name for injection')
-  .requiredOption('--cmd <command>', 'Command to run with secret injected')
+  .option('--vars <varList>', 'Comma-separated list of env var names to check (default: scan all)')
+  .requiredOption('--cmd <command>', 'Command to run with secrets injected')
   .action(
-    async (
-      refs: string[],
-      opts: {
-        reason: string
-        task: string
-        duration: string
-        env?: string
-        cmd: string
-      },
-    ) => {
+    async (opts: {
+      reason: string
+      task: string
+      duration: string
+      vars?: string
+      cmd: string
+    }) => {
       try {
         // 1. Load config and resolve service
         const config = loadConfig()
@@ -35,20 +31,43 @@ const request = new Command('request')
           return
         }
 
-        // 3. Resolve refs to UUIDs
+        // 3. Scan env vars for 2k:// placeholders
+        const varsToCheck = opts.vars
+          ? opts.vars.split(',').map((v) => v.trim())
+          : Object.keys(process.env)
+
+        const placeholders: { envVar: string; ref: string }[] = []
+        for (const varName of varsToCheck) {
+          const value = process.env[varName]
+          if (value && value.startsWith('2k://')) {
+            const ref = value.slice(5) // Remove '2k://' prefix
+            placeholders.push({ envVar: varName, ref })
+          }
+        }
+
+        if (placeholders.length === 0) {
+          console.error(
+            'No 2k:// placeholders found in environment variables' +
+              (opts.vars ? ` (checked: ${opts.vars})` : ''),
+          )
+          process.exitCode = 1
+          return
+        }
+
+        // 4. Resolve refs to UUIDs
         const uuids: string[] = []
-        for (const ref of refs) {
+        for (const { envVar, ref } of placeholders) {
           try {
             const metadata = await service.secrets.resolve(ref)
             uuids.push(metadata.uuid)
           } catch {
-            console.error(`Failed to resolve secret: ${ref}`)
+            console.error(`Failed to resolve secret ref '${ref}' from ${envVar}`)
             process.exitCode = 1
             return
           }
         }
 
-        // 4. Create access request via service
+        // 5. Create access request via service
         const accessRequest = await service.requests.create(
           uuids,
           opts.reason,
@@ -57,7 +76,7 @@ const request = new Command('request')
           opts.cmd,
         )
 
-        // 5. Poll for grant status
+        // 6. Poll for grant status
         const pollIntervalMs = 250
         const maxWaitMs = 5 * 60 * 1000 // 5 minutes
         const deadline = Date.now() + maxWaitMs
@@ -66,26 +85,24 @@ const request = new Command('request')
           grantResult = await service.grants.getStatus(accessRequest.id)
           if (grantResult.status !== 'pending') break
           if (Date.now() > deadline) {
-            console.error(`Timed out waiting for approval: ${refs.join(', ')}`)
+            console.error(
+              `Timed out waiting for approval: ${placeholders.map((p) => p.ref).join(', ')}`,
+            )
             process.exitCode = 1
             return
           }
           await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
         }
         if (grantResult.status !== 'approved') {
-          console.error(`Access request denied: ${refs.join(', ')}`)
+          console.error(`Access request denied: ${placeholders.map((p) => p.ref).join(', ')}`)
           process.exitCode = 1
           return
         }
 
-        // 6. Inject secret and run command
-        const processResult = await service.inject(
-          accessRequest.id,
-          opts.cmd,
-          opts.env ? { envVarName: opts.env } : undefined,
-        )
+        // 7. Inject secrets and run command
+        const processResult = await service.inject(accessRequest.id, opts.cmd)
 
-        // 7. Output result
+        // 8. Output result
         if (processResult.stdout) process.stdout.write(processResult.stdout)
         if (processResult.stderr) process.stderr.write(processResult.stderr)
         // Map null exit code (signal-killed processes) to exit code 1 intentionally,
@@ -95,9 +112,9 @@ const request = new Command('request')
         const message = err instanceof Error ? err.message : String(err)
 
         if (message.includes('not found')) {
-          console.error(`Secret not found: ${refs.join(', ')}`)
+          console.error(`Secret not found`)
         } else if (message.includes('Grant is not valid')) {
-          console.error(`Grant expired: ${refs.join(', ')}`)
+          console.error(`Grant expired`)
         } else {
           console.error(`Error: ${message}`)
         }
@@ -107,4 +124,4 @@ const request = new Command('request')
     },
   )
 
-export { request as requestCommand }
+export { inject as injectCommand }

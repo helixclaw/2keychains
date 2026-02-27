@@ -100,6 +100,11 @@ describe('request command orchestration', () => {
 
     mockLoadConfig.mockReturnValue(createTestConfig())
     mockResolveService.mockReturnValue(mockService)
+    mockSecretsResolve.mockImplementation(async (refOrUuid: string) => ({
+      uuid: refOrUuid,
+      ref: refOrUuid,
+      tags: [],
+    }))
     mockRequestsCreate.mockResolvedValue(createTestAccessRequest())
     mockGrantsGetStatus.mockResolvedValue({ status: 'approved' })
     mockInject.mockResolvedValue({ exitCode: 0, stdout: 'output', stderr: '' })
@@ -245,11 +250,11 @@ describe('request command orchestration', () => {
   })
 
   it('secret not found error: prints user-friendly message', async () => {
-    mockRequestsCreate.mockRejectedValue(new Error('Secret not found'))
+    mockSecretsResolve.mockRejectedValue(new Error('Secret not found'))
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     await runRequest()
 
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Secret UUID not found'))
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to resolve secret'))
     expect(process.exitCode).toBe(1)
     errorSpy.mockRestore()
   })

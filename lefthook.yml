@@ -7,6 +7,7 @@ pre-commit:
     lint:
       glob: '*.{ts,tsx,js,json,md}'
       run: npm run lint
+      stage_fixed: true
     test:
       glob: '*.{ts,tsx}'
       run: npm run test
