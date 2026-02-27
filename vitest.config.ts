@@ -16,6 +16,7 @@ export default defineConfig({
         'src/core/types.ts',
         // Entry point glue (low test value)
         'src/cli/index.ts',
+        'src/cli/password-prompt.ts',
         'src/server/index.ts',
         // Deprecated
         'src/core/server-entry.ts',

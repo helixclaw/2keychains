@@ -2,7 +2,8 @@ import { Command } from 'commander'
 import { createInterface } from 'node:readline'
 
 import { loadConfig } from '../core/config.js'
-import { resolveService } from '../core/service.js'
+import { resolveService, LocalService } from '../core/service.js'
+import { promptPassword } from './password-prompt.js'
 
 function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -56,9 +57,35 @@ secrets
       process.exitCode = 1
       return
     }
-    const service = await resolveService(loadConfig())
-    const result = await service.secrets.add(opts.ref, value, opts.tags)
-    console.log(result.uuid)
+
+    const config = loadConfig()
+
+    if (config.mode === 'client') {
+      console.error('Error: Inline unlock is not supported in client mode.')
+      process.exitCode = 1
+      return
+    }
+
+    const service = (await resolveService(config)) as LocalService
+
+    if (!service.isUnlocked()) {
+      const password = await promptPassword()
+      try {
+        await service.unlock(password)
+      } catch {
+        console.error('Incorrect password.')
+        process.exitCode = 1
+        return
+      }
+    }
+
+    try {
+      const result = await service.secrets.add(opts.ref, value, opts.tags)
+      console.log(result.uuid)
+    } catch (err: unknown) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+      process.exitCode = 1
+    }
   })
 
 secrets

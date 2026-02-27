@@ -9,11 +9,11 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli/index.ts",
-    "lint": "eslint . && prettier --check .",
-    "lint:fix": "eslint --fix . && prettier --write .",
-    "test": "vitest run",
+    "lint": "eslint --fix . && prettier --write .",
+    "lint:no-fix": "eslint . && prettier --check .",
+    "test": "vitest run --coverage",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "test:no-coverage": "vitest run",
     "prepare": "lefthook install"
   },
   "keywords": [

@@ -164,6 +164,49 @@ describe('server start command', () => {
     expect(process.exitCode).toBe(1)
     errorSpy.mockRestore()
   })
+
+  it('handles invalid JSON in health response', async () => {
+    mockGetRunningPid.mockReturnValue(null)
+    mockFork.mockReturnValue(createMockChildProcess(54321))
+    // Invalid JSON will cause JSON.parse to throw
+    mockHealthResponse = { statusCode: 200, data: 'not-valid-json' }
+
+    const mockKill = vi.fn()
+    process.kill = mockKill as unknown as typeof process.kill
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { serverCommand } = await import('../cli/server.js')
+    await serverCommand.parseAsync(['start'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('health check failed'))
+    expect(mockRemovePidFile).toHaveBeenCalled()
+    expect(process.exitCode).toBe(1)
+    errorSpy.mockRestore()
+  })
+
+  it('handles process.kill throwing during cleanup', async () => {
+    mockGetRunningPid.mockReturnValue(null)
+    mockFork.mockReturnValue(createMockChildProcess(54321))
+    mockHealthResponse = new Error('Connection refused')
+
+    // Mock kill to throw an error (process already exited)
+    const mockKill = vi.fn().mockImplementation(() => {
+      throw new Error('ESRCH')
+    })
+    process.kill = mockKill as unknown as typeof process.kill
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { serverCommand } = await import('../cli/server.js')
+    await serverCommand.parseAsync(['start'], { from: 'user' })
+
+    // Should still clean up even when kill throws
+    expect(mockKill).toHaveBeenCalledWith(54321, 'SIGTERM')
+    expect(mockRemovePidFile).toHaveBeenCalled()
+    expect(process.exitCode).toBe(1)
+    errorSpy.mockRestore()
+  })
 })
 
 describe('server stop command', () => {

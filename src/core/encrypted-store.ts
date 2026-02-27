@@ -65,6 +65,11 @@ export class EncryptedSecretStore implements ISecretStore {
     }
   }
 
+  /** Restore unlocked state from a previously saved DEK (from session persistence). */
+  restoreUnlocked(dek: Buffer): void {
+    this.dek = Buffer.from(dek)
+  }
+
   /**
    * Initialize a new encrypted store with a password.
    * Creates the file with an empty secrets array.

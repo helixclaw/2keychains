@@ -9,6 +9,7 @@ import { RemoteService } from './remote-service.js'
 import { EncryptedSecretStore } from './encrypted-store.js'
 import { UnlockSession } from './unlock-session.js'
 import { GrantManager } from './grant.js'
+import { SessionLock } from './session-lock.js'
 import { normalizeCommand, hashCommand } from './command-hash.js'
 import { WorkflowEngine } from './workflow.js'
 import { SecretInjector } from './injector.js'
@@ -55,6 +56,7 @@ export interface Service {
 interface LocalServiceDeps {
   store: EncryptedSecretStore
   unlockSession: UnlockSession
+  sessionLock: SessionLock
   grantManager: GrantManager
   workflowEngine: WorkflowEngine
   injector: SecretInjector
@@ -67,8 +69,11 @@ export class LocalService implements Service {
   private readonly onLocked: () => void
 
   constructor(private readonly deps: LocalServiceDeps) {
-    // When session auto-locks (TTL/idle/max-grants), also lock the encrypted store
-    this.onLocked = () => deps.store.lock()
+    // When session auto-locks (TTL/idle/max-grants), also lock the encrypted store and clear session
+    this.onLocked = () => {
+      deps.store.lock()
+      deps.sessionLock.clear()
+    }
     deps.unlockSession.on('locked', this.onLocked)
   }
 
@@ -82,11 +87,17 @@ export class LocalService implements Service {
     const dek = this.deps.store.getDek()
     if (!dek) throw new Error('Failed to obtain DEK after unlock')
     this.deps.unlockSession.unlock(dek)
+    this.deps.sessionLock.save(dek)
+  }
+
+  isUnlocked(): boolean {
+    return this.deps.unlockSession.isUnlocked()
   }
 
   // Called by `2kc lock` CLI command — not on the Service interface
   lock(): void {
     this.deps.unlockSession.lock()
+    this.deps.sessionLock.clear()
     // EncryptedSecretStore.lock() is called via the 'locked' event handler above
   }
 
@@ -207,6 +218,16 @@ export async function resolveService(config: AppConfig): Promise<Service> {
 
   const store = new EncryptedSecretStore(config.store.path)
   const unlockSession = new UnlockSession(config.unlock)
+  const sessionLock = new SessionLock(config.unlock)
+
+  // Restore session from disk if a valid session exists
+  const savedDek = sessionLock.load()
+  if (savedDek) {
+    store.restoreUnlocked(savedDek)
+    unlockSession.unlock(savedDek)
+    sessionLock.touch()
+  }
+
   const grantManager = new GrantManager(grantsPath, privateKey)
 
   let channel: NotificationChannel
@@ -234,6 +255,7 @@ export async function resolveService(config: AppConfig): Promise<Service> {
   return new LocalService({
     store,
     unlockSession,
+    sessionLock,
     grantManager,
     workflowEngine,
     injector,

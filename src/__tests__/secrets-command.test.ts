@@ -19,6 +19,8 @@ const mockSecretsList = vi.fn<Service['secrets']['list']>()
 const mockSecretsAdd = vi.fn<Service['secrets']['add']>()
 const mockSecretsRemove = vi.fn<Service['secrets']['remove']>()
 const mockSecretsResolve = vi.fn<Service['secrets']['resolve']>()
+const mockIsUnlocked = vi.fn<() => boolean>()
+const mockUnlock = vi.fn<() => Promise<void>>()
 
 const mockService = {
   secrets: {
@@ -27,6 +29,8 @@ const mockService = {
     remove: mockSecretsRemove,
     resolve: mockSecretsResolve,
   },
+  isUnlocked: mockIsUnlocked,
+  unlock: mockUnlock,
 } as unknown as Service
 
 const mockResolveService = vi.fn<() => Service>()
@@ -37,6 +41,13 @@ vi.mock('../core/config.js', () => ({
 
 vi.mock('../core/service.js', () => ({
   resolveService: (...args: unknown[]) => mockResolveService(...(args as [])),
+  LocalService: vi.fn(),
+}))
+
+const mockPromptPassword = vi.fn<() => Promise<string>>()
+
+vi.mock('../cli/password-prompt.js', () => ({
+  promptPassword: (...args: unknown[]) => mockPromptPassword(...(args as [])),
 }))
 
 function createTestConfig(): AppConfig {
@@ -44,9 +55,11 @@ function createTestConfig(): AppConfig {
     mode: 'standalone',
     server: { host: '127.0.0.1', port: 2274 },
     store: { path: '~/.2kc/secrets.json' },
+    unlock: { ttlMs: 900_000 },
     requireApproval: {},
     defaultRequireApproval: false,
     approvalTimeoutMs: 300_000,
+    bindCommand: false,
   }
 }
 
@@ -59,6 +72,7 @@ describe('secrets add command', () => {
     process.exitCode = undefined
     mockLoadConfig.mockReturnValue(createTestConfig())
     mockResolveService.mockReturnValue(mockService)
+    mockIsUnlocked.mockReturnValue(true)
     originalStdin = process.stdin
   })
 
@@ -185,6 +199,76 @@ describe('secrets add command', () => {
     expect(mockSecretsAdd).toHaveBeenCalledWith('prompt-ref', 'prompted-secret-value', undefined)
     expect(logSpy).toHaveBeenCalledWith('prompt-uuid')
     logSpy.mockRestore()
+  })
+
+  it('exits with error when in client mode', async () => {
+    mockLoadConfig.mockReturnValue({
+      ...createTestConfig(),
+      mode: 'client',
+    })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { secretsCommand } = await import('../cli/secrets.js')
+    await secretsCommand.parseAsync(['add', '--ref', 'my-ref', '--value', 'secret'], {
+      from: 'user',
+    })
+
+    expect(errorSpy).toHaveBeenCalledWith('Error: Inline unlock is not supported in client mode.')
+    expect(process.exitCode).toBe(1)
+    expect(mockSecretsAdd).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+
+  it('prompts for password when service is locked and unlocks successfully', async () => {
+    mockIsUnlocked.mockReturnValue(false)
+    mockPromptPassword.mockResolvedValue('test-password')
+    mockUnlock.mockResolvedValue(undefined)
+    mockSecretsAdd.mockResolvedValue({ uuid: 'unlocked-uuid', ref: 'my-ref', tags: [] })
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const { secretsCommand } = await import('../cli/secrets.js')
+    await secretsCommand.parseAsync(['add', '--ref', 'my-ref', '--value', 'secret'], {
+      from: 'user',
+    })
+
+    expect(mockPromptPassword).toHaveBeenCalled()
+    expect(mockUnlock).toHaveBeenCalledWith('test-password')
+    expect(mockSecretsAdd).toHaveBeenCalledWith('my-ref', 'secret', undefined)
+    expect(logSpy).toHaveBeenCalledWith('unlocked-uuid')
+    logSpy.mockRestore()
+  })
+
+  it('exits with error when password is incorrect', async () => {
+    mockIsUnlocked.mockReturnValue(false)
+    mockPromptPassword.mockResolvedValue('wrong-password')
+    mockUnlock.mockRejectedValue(new Error('Incorrect password'))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { secretsCommand } = await import('../cli/secrets.js')
+    await secretsCommand.parseAsync(['add', '--ref', 'my-ref', '--value', 'secret'], {
+      from: 'user',
+    })
+
+    expect(mockPromptPassword).toHaveBeenCalled()
+    expect(mockUnlock).toHaveBeenCalledWith('wrong-password')
+    expect(errorSpy).toHaveBeenCalledWith('Incorrect password.')
+    expect(process.exitCode).toBe(1)
+    expect(mockSecretsAdd).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+
+  it('exits with error when secrets.add fails', async () => {
+    mockSecretsAdd.mockRejectedValue(new Error('Duplicate ref'))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { secretsCommand } = await import('../cli/secrets.js')
+    await secretsCommand.parseAsync(['add', '--ref', 'my-ref', '--value', 'secret'], {
+      from: 'user',
+    })
+
+    expect(errorSpy).toHaveBeenCalledWith('Error: Duplicate ref')
+    expect(process.exitCode).toBe(1)
+    errorSpy.mockRestore()
   })
 })
 

@@ -14,6 +14,7 @@ import { WorkflowEngine } from '../../core/workflow.js'
 import { SecretInjector } from '../../core/injector.js'
 import { RequestLog } from '../../core/request.js'
 import { loadOrGenerateKeyPair } from '../../core/key-manager.js'
+import { SessionLock } from '../../core/session-lock.js'
 import type { NotificationChannel } from '../../channels/channel.js'
 
 // ---------------------------------------------------------------------------
@@ -107,7 +108,10 @@ async function buildService(tmpDir: string, opts: BuildServiceOpts = {}): Promis
   }
 
   const { privateKey, publicKey } = await loadOrGenerateKeyPair(keysPath)
-  const unlockSession = new UnlockSession({ ttlMs: 3_600_000 })
+  const unlockConfig = { ttlMs: 3_600_000 }
+  const unlockSession = new UnlockSession(unlockConfig)
+  const sessionLockPath = join(tmpDir, 'session.lock')
+  const sessionLock = new SessionLock(unlockConfig, sessionLockPath)
   const grantManager = new GrantManager(grantsPath, privateKey)
   const mockChannel = createMockChannel(opts.channelResponse ?? 'approved')
   const workflowEngine = new WorkflowEngine({
@@ -121,6 +125,7 @@ async function buildService(tmpDir: string, opts: BuildServiceOpts = {}): Promis
   const service = new LocalService({
     store,
     unlockSession,
+    sessionLock,
     grantManager,
     workflowEngine,
     injector,

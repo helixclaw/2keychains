@@ -1,23 +1,18 @@
 /// <reference types="vitest/globals" />
 
 import type { AppConfig } from '../core/config.js'
+import type { Service } from '../core/service.js'
 
-const mockQuestion = vi.fn()
-const mockRlClose = vi.fn()
+const mockPromptPassword = vi.fn<() => Promise<string>>()
 
-vi.mock('node:readline', () => ({
-  createInterface: vi.fn(() => ({
-    question: mockQuestion,
-    close: mockRlClose,
-  })),
+vi.mock('../cli/password-prompt.js', () => ({
+  promptPassword: (...args: unknown[]) => mockPromptPassword(...(args as [])),
 }))
 
 const mockExistsSync = vi.fn<() => boolean>()
-const mockReadFileSync = vi.fn<() => string>()
 
 vi.mock('node:fs', () => ({
   existsSync: (...args: unknown[]) => mockExistsSync(...(args as [])),
-  readFileSync: (...args: unknown[]) => mockReadFileSync(...(args as [])),
 }))
 
 const mockLoadConfig = vi.fn<() => AppConfig>()
@@ -26,42 +21,28 @@ vi.mock('../core/config.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...(args as [])),
 }))
 
-const mockDeriveKek = vi.fn<() => Promise<Buffer>>()
+const mockServiceUnlock = vi.fn<() => Promise<void>>()
+const mockServiceLock = vi.fn<() => void>()
 
-vi.mock('../core/kdf.js', () => ({
-  deriveKek: (...args: unknown[]) => mockDeriveKek(...(args as [])),
+const mockService = {
+  unlock: mockServiceUnlock,
+  lock: mockServiceLock,
+} as unknown as Service
+
+const mockResolveService = vi.fn<() => Promise<Service>>()
+
+vi.mock('../core/service.js', () => ({
+  resolveService: (...args: unknown[]) => mockResolveService(...(args as [])),
+  LocalService: vi.fn(),
 }))
 
-const mockUnwrapDek = vi.fn<() => Buffer>()
+const mockSessionLockExists = vi.fn<() => boolean>()
 
-vi.mock('../core/crypto.js', () => ({
-  unwrapDek: (...args: unknown[]) => mockUnwrapDek(...(args as [])),
+vi.mock('../core/session-lock.js', () => ({
+  SessionLock: vi.fn().mockImplementation(() => ({
+    exists: mockSessionLockExists,
+  })),
 }))
-
-const mockSessionUnlock = vi.fn<() => void>()
-const mockSessionLock = vi.fn<() => void>()
-
-vi.mock('../core/unlock-session.js', () => ({
-  UnlockSession: vi.fn(),
-}))
-
-import { UnlockSession } from '../core/unlock-session.js'
-const MockUnlockSession = vi.mocked(UnlockSession)
-
-const MOCK_STORE_FILE = {
-  version: 1,
-  kdf: {
-    algorithm: 'scrypt',
-    salt: Buffer.from('testsalt').toString('base64'),
-    params: { N: 1024, r: 8, p: 1 },
-  },
-  wrappedDek: {
-    ciphertext: 'aGVsbG8=',
-    nonce: 'bm9uY2U=',
-    tag: 'dGFn',
-  },
-  secrets: [],
-}
 
 function createTestConfig(): AppConfig {
   return {
@@ -72,6 +53,7 @@ function createTestConfig(): AppConfig {
     requireApproval: {},
     defaultRequireApproval: false,
     approvalTimeoutMs: 300_000,
+    bindCommand: false,
   }
 }
 
@@ -82,19 +64,8 @@ describe('unlock command', () => {
     savedExitCode = process.exitCode
     process.exitCode = undefined
     vi.clearAllMocks()
-
-    // Reset the mock session methods to fresh fns after clearAllMocks
-    MockUnlockSession.mockImplementation(function () {
-      return {
-        unlock: mockSessionUnlock,
-        lock: mockSessionLock,
-        isUnlocked: vi.fn(() => true),
-        getDek: vi.fn(() => null),
-        on: vi.fn(),
-        off: vi.fn(),
-        emit: vi.fn(),
-      }
-    })
+    mockLoadConfig.mockReturnValue(createTestConfig())
+    mockResolveService.mockResolvedValue(mockService)
   })
 
   afterEach(() => {
@@ -103,26 +74,17 @@ describe('unlock command', () => {
 
   it('unlocks successfully with correct password', async () => {
     mockExistsSync.mockReturnValue(true)
-    mockReadFileSync.mockReturnValue(JSON.stringify(MOCK_STORE_FILE))
-
-    mockQuestion.mockImplementation((_prompt: string, cb: (answer: string) => void) => {
-      cb('correct-password')
-    })
-
-    const mockDek = Buffer.alloc(32, 0xde)
-    mockDeriveKek.mockResolvedValue(Buffer.alloc(32, 0xab))
-    mockUnwrapDek.mockReturnValue(mockDek)
-    mockLoadConfig.mockReturnValue(createTestConfig())
+    mockPromptPassword.mockResolvedValue('correct-password')
+    mockServiceUnlock.mockResolvedValue(undefined)
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
 
     const { unlockCommand } = await import('../cli/unlock.js')
     await unlockCommand.parseAsync([], { from: 'user' })
 
-    expect(mockDeriveKek).toHaveBeenCalled()
-    expect(mockUnwrapDek).toHaveBeenCalled()
-    expect(MockUnlockSession).toHaveBeenCalledWith({ ttlMs: 900_000 })
-    expect(mockSessionUnlock).toHaveBeenCalledWith(mockDek)
+    expect(mockPromptPassword).toHaveBeenCalled()
+    expect(mockResolveService).toHaveBeenCalled()
+    expect(mockServiceUnlock).toHaveBeenCalledWith('correct-password')
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Store unlocked'))
     expect(process.exitCode).toBeUndefined()
 
@@ -131,16 +93,8 @@ describe('unlock command', () => {
 
   it('prints error and sets exitCode=1 when password is wrong', async () => {
     mockExistsSync.mockReturnValue(true)
-    mockReadFileSync.mockReturnValue(JSON.stringify(MOCK_STORE_FILE))
-
-    mockQuestion.mockImplementation((_prompt: string, cb: (answer: string) => void) => {
-      cb('wrong-password')
-    })
-
-    mockDeriveKek.mockResolvedValue(Buffer.alloc(32, 0xab))
-    mockUnwrapDek.mockImplementation(() => {
-      throw new Error('Unsupported state or unable to authenticate data')
-    })
+    mockPromptPassword.mockResolvedValue('wrong-password')
+    mockServiceUnlock.mockRejectedValue(new Error('Incorrect password'))
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
@@ -163,21 +117,73 @@ describe('unlock command', () => {
 
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Encrypted store not found'))
     expect(process.exitCode).toBe(1)
+    expect(mockPromptPassword).not.toHaveBeenCalled()
 
     errorSpy.mockRestore()
   })
 
-  it('formats TTL in hours when ttlMs >= 3600000', async () => {
-    mockExistsSync.mockReturnValue(true)
-    mockReadFileSync.mockReturnValue(JSON.stringify(MOCK_STORE_FILE))
-
-    mockQuestion.mockImplementation((_prompt: string, cb: (answer: string) => void) => {
-      cb('correct-password')
+  it('prints error and sets exitCode=1 when in client mode', async () => {
+    mockLoadConfig.mockReturnValue({
+      ...createTestConfig(),
+      mode: 'client',
     })
 
-    const mockDek = Buffer.alloc(32, 0xde)
-    mockDeriveKek.mockResolvedValue(Buffer.alloc(32, 0xab))
-    mockUnwrapDek.mockReturnValue(mockDek)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { unlockCommand } = await import('../cli/unlock.js')
+    await unlockCommand.parseAsync([], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Error: Unlock persistence is not supported in client mode.',
+    )
+    expect(process.exitCode).toBe(1)
+    expect(mockPromptPassword).not.toHaveBeenCalled()
+
+    errorSpy.mockRestore()
+  })
+
+  it('formats TTL in seconds when ttlMs < 60000', async () => {
+    mockExistsSync.mockReturnValue(true)
+    mockPromptPassword.mockResolvedValue('correct-password')
+    mockServiceUnlock.mockResolvedValue(undefined)
+    mockLoadConfig.mockReturnValue({
+      ...createTestConfig(),
+      unlock: { ttlMs: 30_000 },
+    })
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const { unlockCommand } = await import('../cli/unlock.js')
+    await unlockCommand.parseAsync([], { from: 'user' })
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('30 seconds'))
+
+    logSpy.mockRestore()
+  })
+
+  it('formats TTL as "1 second" (singular) for exactly 1000ms', async () => {
+    mockExistsSync.mockReturnValue(true)
+    mockPromptPassword.mockResolvedValue('correct-password')
+    mockServiceUnlock.mockResolvedValue(undefined)
+    mockLoadConfig.mockReturnValue({
+      ...createTestConfig(),
+      unlock: { ttlMs: 1000 },
+    })
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const { unlockCommand } = await import('../cli/unlock.js')
+    await unlockCommand.parseAsync([], { from: 'user' })
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('1 second'))
+
+    logSpy.mockRestore()
+  })
+
+  it('formats TTL in hours when ttlMs >= 3600000', async () => {
+    mockExistsSync.mockReturnValue(true)
+    mockPromptPassword.mockResolvedValue('correct-password')
+    mockServiceUnlock.mockResolvedValue(undefined)
     mockLoadConfig.mockReturnValue({
       ...createTestConfig(),
       unlock: { ttlMs: 7_200_000 },
@@ -195,15 +201,8 @@ describe('unlock command', () => {
 
   it('formats TTL as "1 hour" (singular) for exactly 3600000ms', async () => {
     mockExistsSync.mockReturnValue(true)
-    mockReadFileSync.mockReturnValue(JSON.stringify(MOCK_STORE_FILE))
-
-    mockQuestion.mockImplementation((_prompt: string, cb: (answer: string) => void) => {
-      cb('correct-password')
-    })
-
-    const mockDek = Buffer.alloc(32, 0xde)
-    mockDeriveKek.mockResolvedValue(Buffer.alloc(32, 0xab))
-    mockUnwrapDek.mockReturnValue(mockDek)
+    mockPromptPassword.mockResolvedValue('correct-password')
+    mockServiceUnlock.mockResolvedValue(undefined)
     mockLoadConfig.mockReturnValue({
       ...createTestConfig(),
       unlock: { ttlMs: 3_600_000 },
@@ -218,44 +217,6 @@ describe('unlock command', () => {
 
     logSpy.mockRestore()
   })
-
-  it('sets exitCode=1 when store file is malformed (bad version)', async () => {
-    mockExistsSync.mockReturnValue(true)
-    mockReadFileSync.mockReturnValue(JSON.stringify({ version: 99, kdf: null, wrappedDek: null }))
-
-    mockQuestion.mockImplementation((_prompt: string, cb: (answer: string) => void) => {
-      cb('password')
-    })
-
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    const { unlockCommand } = await import('../cli/unlock.js')
-    await unlockCommand.parseAsync([], { from: 'user' })
-
-    expect(errorSpy).toHaveBeenCalledWith('Error: Malformed encrypted store file.')
-    expect(process.exitCode).toBe(1)
-
-    errorSpy.mockRestore()
-  })
-
-  it('sets exitCode=1 when store file cannot be read (parse error)', async () => {
-    mockExistsSync.mockReturnValue(true)
-    mockReadFileSync.mockReturnValue('not valid json{{{')
-
-    mockQuestion.mockImplementation((_prompt: string, cb: (answer: string) => void) => {
-      cb('password')
-    })
-
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    const { unlockCommand } = await import('../cli/unlock.js')
-    await unlockCommand.parseAsync([], { from: 'user' })
-
-    expect(errorSpy).toHaveBeenCalledWith('Error: Failed to read encrypted store file.')
-    expect(process.exitCode).toBe(1)
-
-    errorSpy.mockRestore()
-  })
 })
 
 describe('lock command', () => {
@@ -265,18 +226,22 @@ describe('lock command', () => {
     savedExitCode = process.exitCode
     process.exitCode = undefined
     vi.clearAllMocks()
+    mockLoadConfig.mockReturnValue(createTestConfig())
+    mockResolveService.mockResolvedValue(mockService)
   })
 
   afterEach(() => {
     process.exitCode = savedExitCode
   })
 
-  it('prints "Store locked."', async () => {
+  it('locks the service and prints "Store locked."', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
 
     const { lockCommand } = await import('../cli/unlock.js')
     await lockCommand.parseAsync([], { from: 'user' })
 
+    expect(mockResolveService).toHaveBeenCalled()
+    expect(mockServiceLock).toHaveBeenCalled()
     expect(logSpy).toHaveBeenCalledWith('Store locked.')
 
     logSpy.mockRestore()
@@ -290,6 +255,7 @@ describe('status command', () => {
     savedExitCode = process.exitCode
     process.exitCode = undefined
     vi.clearAllMocks()
+    mockLoadConfig.mockReturnValue(createTestConfig())
   })
 
   afterEach(() => {
@@ -311,8 +277,23 @@ describe('status command', () => {
     logSpy.mockRestore()
   })
 
-  it('prints "Store is locked." when store file exists', async () => {
+  it('prints "Store is unlocked." when session exists and is valid', async () => {
     mockExistsSync.mockReturnValue(true)
+    mockSessionLockExists.mockReturnValue(true)
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const { statusCommand } = await import('../cli/unlock.js')
+    await statusCommand.parseAsync([], { from: 'user' })
+
+    expect(logSpy).toHaveBeenCalledWith('Store is unlocked.')
+
+    logSpy.mockRestore()
+  })
+
+  it('prints "Store is locked." when session does not exist or is expired', async () => {
+    mockExistsSync.mockReturnValue(true)
+    mockSessionLockExists.mockReturnValue(false)
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
 

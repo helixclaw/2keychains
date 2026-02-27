@@ -10,6 +10,7 @@ import type { GrantManager, AccessGrant } from '../core/grant.js'
 import type { WorkflowEngine } from '../core/workflow.js'
 import type { SecretInjector } from '../core/injector.js'
 import type { RequestLog } from '../core/request.js'
+import type { SessionLock } from '../core/session-lock.js'
 
 describe('resolveService', () => {
   it('returns LocalService for standalone mode', async () => {
@@ -117,11 +118,20 @@ function makeService() {
     getById: vi.fn().mockReturnValue(undefined),
   } as unknown as RequestLog
 
+  const sessionLock = {
+    save: vi.fn(),
+    load: vi.fn().mockReturnValue(null),
+    clear: vi.fn(),
+    touch: vi.fn(),
+    exists: vi.fn().mockReturnValue(false),
+  } as unknown as SessionLock
+
   const startTime = Date.now() - 1000
 
   const service = new LocalService({
     store,
     unlockSession,
+    sessionLock,
     grantManager,
     workflowEngine,
     injector,
@@ -133,6 +143,7 @@ function makeService() {
     service,
     store,
     unlockSession,
+    sessionLock,
     grantManager,
     workflowEngine,
     injector,
@@ -245,6 +256,7 @@ describe('LocalService', () => {
       const {
         store,
         unlockSession,
+        sessionLock,
         grantManager,
         workflowEngine,
         injector,
@@ -254,6 +266,7 @@ describe('LocalService', () => {
       const serviceWithBind = new LocalService({
         store,
         unlockSession,
+        sessionLock,
         grantManager,
         workflowEngine,
         injector,
@@ -400,7 +413,7 @@ describe('LocalService', () => {
 
   describe('unlock()', () => {
     it('unlocks the store and passes DEK to session', async () => {
-      const { service, store, unlockSession } = makeService()
+      const { service, store, unlockSession, sessionLock } = makeService()
       ;(store.unlock as MockInstance).mockResolvedValue(undefined)
       ;(store.getDek as MockInstance).mockReturnValue(Buffer.alloc(32, 0xaa))
 
@@ -408,6 +421,7 @@ describe('LocalService', () => {
 
       expect(store.unlock).toHaveBeenCalledWith('test-password')
       expect(unlockSession.unlock).toHaveBeenCalledWith(Buffer.alloc(32, 0xaa))
+      expect(sessionLock.save).toHaveBeenCalledWith(Buffer.alloc(32, 0xaa))
     })
 
     it('throws when DEK is null after unlock', async () => {
@@ -420,10 +434,25 @@ describe('LocalService', () => {
   })
 
   describe('lock()', () => {
-    it('locks the session (store locks via event)', () => {
-      const { service, unlockSession } = makeService()
+    it('locks the session and clears sessionLock', () => {
+      const { service, unlockSession, sessionLock } = makeService()
       service.lock()
       expect(unlockSession.lock).toHaveBeenCalled()
+      expect(sessionLock.clear).toHaveBeenCalled()
+    })
+  })
+
+  describe('isUnlocked()', () => {
+    it('returns true when session is unlocked', () => {
+      const { service, unlockSession } = makeService()
+      ;(unlockSession.isUnlocked as MockInstance).mockReturnValue(true)
+      expect(service.isUnlocked()).toBe(true)
+    })
+
+    it('returns false when session is locked', () => {
+      const { service, unlockSession } = makeService()
+      ;(unlockSession.isUnlocked as MockInstance).mockReturnValue(false)
+      expect(service.isUnlocked()).toBe(false)
     })
   })
 

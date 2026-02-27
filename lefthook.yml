@@ -7,9 +7,6 @@ pre-commit:
     lint:
       glob: '*.{ts,tsx,js,json,md}'
       run: npm run lint
-    coverage:
-      glob: '*.{ts,tsx}'
-      run: npm run test:coverage
     test:
       glob: '*.{ts,tsx}'
       run: npm run test
