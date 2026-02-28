@@ -18,8 +18,6 @@ export default defineConfig({
         'src/cli/index.ts',
         'src/cli/password-prompt.ts',
         'src/server/index.ts',
-        // Deprecated
-        'src/core/server-entry.ts',
       ],
       thresholds: {
         lines: 95,
