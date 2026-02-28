@@ -41,12 +41,9 @@ function makeJsonResponse(status: number, body: unknown, statusText = 'OK') {
 
 function makeDeps(overrides?: Partial<RemoteServiceDeps>): RemoteServiceDeps {
   return {
-    unlockSession: {
-      isUnlocked: vi.fn().mockReturnValue(true),
-      recordGrantUsage: vi.fn(),
-    } as unknown as RemoteServiceDeps['unlockSession'],
     injector: {
       inject: vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'ok', stderr: '' }),
+      injectWithCache: vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'ok', stderr: '' }),
     } as unknown as RemoteServiceDeps['injector'],
     ...overrides,
   }
@@ -278,9 +275,18 @@ describe('RemoteService', () => {
     })
   })
 
-  describe('inject (local)', () => {
-    it('receives signed grant, verifies JWS, injects locally using SecretInjector', async () => {
-      const fetchMock = mockFetchResponse(200, { jws: 'signed.jws.token' })
+  describe('inject (remote)', () => {
+    it('verifies JWS, consumes grant, and uses injectWithCache', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(makeLoginSuccessResponse('session-1'))
+        .mockResolvedValueOnce(makeJsonResponse(200, { jws: 'signed.jws.token' }))
+        .mockResolvedValueOnce(
+          makeJsonResponse(200, {
+            grantId: 'grant-abc',
+            secrets: { 'uuid-1': { uuid: 'uuid-1', ref: 'my-key', value: 'secret-value' } },
+          }),
+        )
       globalThis.fetch = fetchMock
 
       vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockResolvedValue({
@@ -295,16 +301,32 @@ describe('RemoteService', () => {
       const result = await service.inject('req-1', 'echo hello')
 
       expect(result).toEqual({ exitCode: 0, stdout: 'ok', stderr: '' })
-      expect(deps.injector!.inject).toHaveBeenCalledWith(
-        'grant-abc',
+      expect(deps.injector!.injectWithCache).toHaveBeenCalledWith(
         ['/bin/sh', '-c', 'echo hello'],
+        expect.any(Map),
         undefined,
       )
-      expect(deps.unlockSession!.recordGrantUsage).toHaveBeenCalled()
+      // Verify the secret cache was passed correctly
+      const cacheArg = (deps.injector!.injectWithCache as ReturnType<typeof vi.fn>).mock
+        .calls[0][1] as Map<string, unknown>
+      expect(cacheArg.get('uuid-1')).toEqual({
+        uuid: 'uuid-1',
+        ref: 'my-key',
+        value: 'secret-value',
+      })
     })
 
-    it('passes envVarName option to injector', async () => {
-      const fetchMock = mockFetchResponse(200, { jws: 'signed.jws.token' })
+    it('passes envVarName option to injectWithCache', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(makeLoginSuccessResponse('session-1'))
+        .mockResolvedValueOnce(makeJsonResponse(200, { jws: 'signed.jws.token' }))
+        .mockResolvedValueOnce(
+          makeJsonResponse(200, {
+            grantId: 'grant-abc',
+            secrets: { 'uuid-1': { uuid: 'uuid-1', ref: 'my-key', value: 'secret-value' } },
+          }),
+        )
       globalThis.fetch = fetchMock
 
       vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockResolvedValue({
@@ -318,39 +340,18 @@ describe('RemoteService', () => {
       const service = new RemoteService(makeConfig(), deps)
       await service.inject('req-1', 'echo hello', { envVarName: 'SECRET_VAR' })
 
-      expect(deps.injector!.inject).toHaveBeenCalledWith(
-        'grant-abc',
+      expect(deps.injector!.injectWithCache).toHaveBeenCalledWith(
         ['/bin/sh', '-c', 'echo hello'],
+        expect.any(Map),
         { envVarName: 'SECRET_VAR' },
       )
     })
 
-    it('throws when local store is locked', async () => {
-      const fetchMock = mockFetchResponse(200, { jws: 'signed.jws.token' })
-      globalThis.fetch = fetchMock
-
-      vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockResolvedValue({
-        grantId: 'grant-abc',
-        requestId: 'req-1',
-        secretUuids: ['uuid-1'],
-        expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      })
-
-      const deps = makeDeps({
-        unlockSession: {
-          isUnlocked: vi.fn().mockReturnValue(false),
-          recordGrantUsage: vi.fn(),
-        } as unknown as RemoteServiceDeps['unlockSession'],
-      })
-      const service = new RemoteService(makeConfig(), deps)
-
-      await expect(service.inject('req-1', 'echo hello')).rejects.toThrow(
-        'Local store is locked. Run `2kc unlock` before requesting secrets.',
-      )
-    })
-
     it('throws when JWS verification fails', async () => {
-      const fetchMock = mockFetchResponse(200, { jws: 'tampered.jws.token' })
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(makeLoginSuccessResponse('session-1'))
+        .mockResolvedValueOnce(makeJsonResponse(200, { jws: 'tampered.jws.token' }))
       globalThis.fetch = fetchMock
 
       vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockRejectedValue(
@@ -364,7 +365,10 @@ describe('RemoteService', () => {
     })
 
     it('throws when grant is expired', async () => {
-      const fetchMock = mockFetchResponse(200, { jws: 'expired.jws.token' })
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(makeLoginSuccessResponse('session-1'))
+        .mockResolvedValueOnce(makeJsonResponse(200, { jws: 'expired.jws.token' }))
       globalThis.fetch = fetchMock
 
       vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockRejectedValue(
@@ -377,17 +381,17 @@ describe('RemoteService', () => {
       await expect(service.inject('req-1', 'echo hello')).rejects.toThrow('Grant has expired')
     })
 
-    it('throws when unlockSession not configured', async () => {
-      const deps = makeDeps({ unlockSession: undefined })
-      const service = new RemoteService(makeConfig(), deps)
-
-      await expect(service.inject('req-1', 'echo hello')).rejects.toThrow(
-        'unlockSession not configured',
-      )
-    })
-
     it('throws when injector not configured', async () => {
-      const fetchMock = mockFetchResponse(200, { jws: 'signed.jws.token' })
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(makeLoginSuccessResponse('session-1'))
+        .mockResolvedValueOnce(makeJsonResponse(200, { jws: 'signed.jws.token' }))
+        .mockResolvedValueOnce(
+          makeJsonResponse(200, {
+            grantId: 'grant-abc',
+            secrets: { 'uuid-1': { uuid: 'uuid-1', ref: 'my-key', value: 'secret-value' } },
+          }),
+        )
       globalThis.fetch = fetchMock
 
       vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockResolvedValue({
@@ -400,13 +404,20 @@ describe('RemoteService', () => {
       const deps = makeDeps({ injector: undefined })
       const service = new RemoteService(makeConfig(), deps)
 
-      await expect(service.inject('req-1', 'echo hello')).rejects.toThrow(
-        'Injector not available in client mode',
-      )
+      await expect(service.inject('req-1', 'echo hello')).rejects.toThrow('Injector not available')
     })
 
     it('passes SHA-256 hash of command to verifyGrant', async () => {
-      const fetchMock = mockFetchResponse(200, { jws: 'signed.jws.token' })
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(makeLoginSuccessResponse('session-1'))
+        .mockResolvedValueOnce(makeJsonResponse(200, { jws: 'signed.jws.token' }))
+        .mockResolvedValueOnce(
+          makeJsonResponse(200, {
+            grantId: 'grant-abc',
+            secrets: { 'uuid-1': { uuid: 'uuid-1', ref: 'my-key', value: 'secret-value' } },
+          }),
+        )
       globalThis.fetch = fetchMock
 
       const verifyMock = vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockResolvedValue({
@@ -424,6 +435,40 @@ describe('RemoteService', () => {
       const { createHash } = await import('node:crypto')
       const expectedHash = createHash('sha256').update('echo hello').digest('hex')
       expect(verifyMock).toHaveBeenCalledWith('signed.jws.token', expectedHash)
+    })
+
+    it('calls consume endpoint to fetch secrets from server', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(makeLoginSuccessResponse('session-1'))
+        .mockResolvedValueOnce(makeJsonResponse(200, { jws: 'signed.jws.token' }))
+        .mockResolvedValueOnce(
+          makeJsonResponse(200, {
+            grantId: 'grant-abc',
+            secrets: {
+              'uuid-1': { uuid: 'uuid-1', ref: 'key-1', value: 'value-1' },
+              'uuid-2': { uuid: 'uuid-2', ref: 'key-2', value: 'value-2' },
+            },
+          }),
+        )
+      globalThis.fetch = fetchMock
+
+      vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockResolvedValue({
+        grantId: 'grant-abc',
+        requestId: 'req-1',
+        secretUuids: ['uuid-1', 'uuid-2'],
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      })
+
+      const deps = makeDeps()
+      const service = new RemoteService(makeConfig(), deps)
+      await service.inject('req-1', 'echo hello')
+
+      // Verify consume endpoint was called
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:2274/api/grants/req-1/consume',
+        expect.objectContaining({ method: 'POST' }),
+      )
     })
   })
 

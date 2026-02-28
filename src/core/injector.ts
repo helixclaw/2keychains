@@ -2,7 +2,11 @@ import { spawn } from 'node:child_process'
 import type { GrantManager } from './grant.js'
 import type { ISecretStore } from './secret-store.js'
 import type { ProcessResult } from './types.js'
+
 import { RedactTransform } from './redact.js'
+
+/** Cache of secrets fetched from server for remote injection */
+export type GrantSecretCache = Map<string, { uuid: string; ref: string; value: string }>
 
 export interface InjectOptions {
   timeoutMs?: number
@@ -16,8 +20,8 @@ const PLACEHOLDER_RE = /^2k:\/\/(.+)$/
 
 export class SecretInjector {
   constructor(
-    private readonly grantManager: GrantManager,
-    private readonly secretStore: ISecretStore,
+    private readonly grantManager: GrantManager | null,
+    private readonly secretStore: ISecretStore | null,
   ) {}
 
   async inject(
@@ -27,6 +31,14 @@ export class SecretInjector {
   ): Promise<ProcessResult> {
     if (command.length === 0) {
       throw new Error('Command must not be empty')
+    }
+
+    if (!this.grantManager) {
+      throw new Error('GrantManager not available')
+    }
+
+    if (!this.secretStore) {
+      throw new Error('SecretStore not available')
     }
 
     // 1. Validate grant -- reject immediately if invalid/expired
@@ -67,7 +79,7 @@ export class SecretInjector {
     const secrets = grant.secretUuids
       .map((uuid) => {
         try {
-          return this.secretStore.getValue(uuid)
+          return this.secretStore!.getValue(uuid)
         } catch {
           return null
         }
@@ -91,10 +103,52 @@ export class SecretInjector {
     }
   }
 
+  /**
+   * Inject secrets from a pre-fetched cache (for remote/client mode).
+   * Grant validation is done server-side; this method just runs the process
+   * with the provided secrets.
+   */
+  async injectWithCache(
+    command: string[],
+    secretCache: GrantSecretCache,
+    options?: InjectOptions,
+  ): Promise<ProcessResult> {
+    if (command.length === 0) {
+      throw new Error('Command must not be empty')
+    }
+
+    // 1. Build env object
+    const env: Record<string, string> = {}
+    for (const [key, val] of Object.entries(process.env)) {
+      if (val !== undefined) {
+        env[key] = val
+      }
+    }
+
+    // 2. If envVarName is provided, inject the first secret explicitly
+    if (options?.envVarName && secretCache.size > 0) {
+      const [firstSecret] = secretCache.values()
+      env[options.envVarName] = firstSecret.value
+    }
+
+    // 3. Scan and replace 2k:// placeholders using cache
+    const allowedUuids = [...secretCache.keys()]
+    const finalEnv = this.scanAndReplaceWithCache(env, secretCache, allowedUuids)
+
+    // 4. Collect secrets for redaction
+    const secrets = [...secretCache.values()].map((s) => s.value)
+
+    // 5. Spawn process (grant already marked used on server)
+    return this.spawnProcess(command, finalEnv, options?.timeoutMs ?? DEFAULT_TIMEOUT_MS, secrets)
+  }
+
   private scanAndReplace(
     env: Record<string, string>,
     allowedSecretUuids: string[],
   ): Record<string, string> {
+    if (!this.secretStore) {
+      throw new Error('SecretStore not available')
+    }
     const result = { ...env }
     for (const [key, value] of Object.entries(result)) {
       const match = PLACEHOLDER_RE.exec(value)
@@ -107,6 +161,27 @@ export class SecretInjector {
           )
         }
         result[key] = resolved.value
+      }
+    }
+    return result
+  }
+
+  private scanAndReplaceWithCache(
+    env: Record<string, string>,
+    secretCache: GrantSecretCache,
+    allowedUuids: string[],
+  ): Record<string, string> {
+    const result = { ...env }
+    for (const [key, value] of Object.entries(result)) {
+      const match = PLACEHOLDER_RE.exec(value)
+      if (match) {
+        const ref = match[1]
+        // Look up by ref or UUID in cache
+        const secret = [...secretCache.values()].find((s) => s.ref === ref || s.uuid === ref)
+        if (!secret || !allowedUuids.includes(secret.uuid)) {
+          throw new Error(`Placeholder 2k://${ref} not covered by grant`)
+        }
+        result[key] = secret.value
       }
     }
     return result

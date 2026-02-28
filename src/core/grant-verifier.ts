@@ -82,10 +82,9 @@ export class GrantVerifier {
       throw new Error('Grant has expired')
     }
 
-    if (expectedCommandHash !== undefined) {
-      if (payload.commandHash === undefined) {
-        throw new Error('Grant is missing command hash')
-      }
+    // If the grant has a commandHash, verify it matches the expected value.
+    // If the grant does NOT have a commandHash, any command is allowed (server had bindCommand: false).
+    if (payload.commandHash !== undefined && expectedCommandHash !== undefined) {
       if (payload.commandHash !== expectedCommandHash) {
         throw new Error('Grant command hash does not match the requested command')
       }

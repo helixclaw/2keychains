@@ -86,6 +86,7 @@ config
         server: {
           host: validated.serverHost,
           port: validated.serverPort,
+          pollIntervalMs: 3000,
           ...(validated.serverAuthToken !== undefined
             ? { authToken: validated.serverAuthToken }
             : {}),

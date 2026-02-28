@@ -76,7 +76,7 @@ describe('loadConfig', () => {
 
     const config = loadConfig()
     expect(config.mode).toBe('standalone')
-    expect(config.server).toEqual({ host: '127.0.0.1', port: 2274 })
+    expect(config.server).toEqual({ host: '127.0.0.1', port: 2274, pollIntervalMs: 3000 })
     expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.enc.json'))
     expect(config.discord).toBeUndefined()
     expect(config.requireApproval).toEqual({})
@@ -113,7 +113,7 @@ describe('parseConfig', () => {
   it('parses a minimal config with all defaults', () => {
     const config = parseConfig(minimalValid)
     expect(config.mode).toBe('standalone')
-    expect(config.server).toEqual({ host: '127.0.0.1', port: 2274 })
+    expect(config.server).toEqual({ host: '127.0.0.1', port: 2274, pollIntervalMs: 3000 })
     expect(config.store.path).toBe(join('/tmp/test-home', '.2kc', 'secrets.enc.json'))
     expect(config.discord).toBeUndefined()
     expect(config.requireApproval).toEqual({})
@@ -439,5 +439,13 @@ describe('getConfig', () => {
     getConfig('/test/generic-error-path')
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Permission denied'))
     expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+
+  it('returns cached config on second call with same path', async () => {
+    mockReadFileSync.mockReturnValue(JSON.stringify({ mode: 'standalone' }))
+    const { getConfig } = await import('../core/config.js')
+    const config1 = getConfig('/test/cache-hit-path')
+    const config2 = getConfig('/test/cache-hit-path')
+    expect(config1).toBe(config2) // Same object reference (cache hit)
   })
 })

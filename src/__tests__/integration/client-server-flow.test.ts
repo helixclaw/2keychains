@@ -15,7 +15,7 @@ import { SecretInjector } from '../../core/injector.js'
 import { RequestLog } from '../../core/request.js'
 import { loadOrGenerateKeyPair } from '../../core/key-manager.js'
 import { SessionLock } from '../../core/session-lock.js'
-import type { NotificationChannel } from '../../channels/channel.js'
+import { createMockChannel } from '../mocks/mock-notification-channel.js'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -31,16 +31,6 @@ const SHORT_TTL = 1500
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Build a mock NotificationChannel that resolves every approval request with
- *  the given response. */
-function createMockChannel(response: 'approved' | 'denied' | 'timeout'): NotificationChannel {
-  return {
-    sendApprovalRequest: vi.fn().mockResolvedValue('msg-id'),
-    waitForResponse: vi.fn().mockResolvedValue(response),
-    sendNotification: vi.fn().mockResolvedValue(undefined),
-  }
-}
 
 /** POST /api/auth/login with the static auth token; returns the session payload. */
 async function login(
@@ -487,6 +477,169 @@ describe('Phase 2 Client-Server Flow', () => {
         // because service.destroy() is idempotent and server.close() on a closed
         // instance resolves immediately.
       }
+    })
+  })
+
+  describe('redaction', () => {
+    it('multiple secrets are all redacted from stdout', async () => {
+      const headers = { authorization: `Bearer ${sessionToken}` }
+
+      // Add multiple secrets
+      const uuid2 = (await service.secrets.add('second-key', 'second-secret-value', [])).uuid
+      const uuid3 = (await service.secrets.add('third-key', 'third-secret-42', [])).uuid
+
+      // Create request for all secrets
+      const reqRes = await server.inject({
+        method: 'POST',
+        url: '/api/requests',
+        headers,
+        payload: {
+          secretUuids: [secretUuid, uuid2, uuid3],
+          reason: 'multi-secret test',
+          taskRef: 'TASK-M',
+        },
+      })
+      expect(reqRes.statusCode).toBe(201)
+      const { id: requestId } = reqRes.json() as { id: string }
+
+      await waitForGrant(server, requestId, headers, 'approved')
+
+      // Inject: output all three secrets
+      const injectRes = await server.inject({
+        method: 'POST',
+        url: '/api/inject',
+        headers,
+        payload: {
+          requestId,
+          command: 'echo "$S1 $S2 $S3"',
+          envVarName: 'S1',
+        },
+      })
+      expect(injectRes.statusCode).toBe(200)
+      const result = injectRes.json() as { stdout: string; exitCode: number | null }
+      expect(result.exitCode).toBe(0)
+
+      // All secrets should be redacted (the first one via envVarName)
+      expect(result.stdout).toContain('[REDACTED]')
+      expect(result.stdout).not.toContain('secret-value')
+    })
+
+    it('secrets in stderr are redacted', async () => {
+      const headers = { authorization: `Bearer ${sessionToken}` }
+
+      const reqRes = await server.inject({
+        method: 'POST',
+        url: '/api/requests',
+        headers,
+        payload: {
+          secretUuids: [secretUuid],
+          reason: 'stderr test',
+          taskRef: 'TASK-SE',
+        },
+      })
+      expect(reqRes.statusCode).toBe(201)
+      const { id: requestId } = reqRes.json() as { id: string }
+
+      await waitForGrant(server, requestId, headers, 'approved')
+
+      // Inject: write secret to stderr
+      const injectRes = await server.inject({
+        method: 'POST',
+        url: '/api/inject',
+        headers,
+        payload: {
+          requestId,
+          command: 'echo "$MY_SECRET" >&2',
+          envVarName: 'MY_SECRET',
+        },
+      })
+      expect(injectRes.statusCode).toBe(200)
+      const result = injectRes.json() as { stdout: string; stderr: string; exitCode: number | null }
+      expect(result.exitCode).toBe(0)
+
+      // Secret should be redacted from stderr
+      expect(result.stderr).toContain('[REDACTED]')
+      expect(result.stderr).not.toContain('secret-value')
+    })
+
+    it('multi-line output with repeated secrets is fully redacted', async () => {
+      const headers = { authorization: `Bearer ${sessionToken}` }
+
+      const reqRes = await server.inject({
+        method: 'POST',
+        url: '/api/requests',
+        headers,
+        payload: {
+          secretUuids: [secretUuid],
+          reason: 'multi-line test',
+          taskRef: 'TASK-ML',
+        },
+      })
+      expect(reqRes.statusCode).toBe(201)
+      const { id: requestId } = reqRes.json() as { id: string }
+
+      await waitForGrant(server, requestId, headers, 'approved')
+
+      // Inject: output secret on multiple lines
+      const injectRes = await server.inject({
+        method: 'POST',
+        url: '/api/inject',
+        headers,
+        payload: {
+          requestId,
+          command: 'echo "line1: $S"; echo "line2: $S"; echo "line3: $S"',
+          envVarName: 'S',
+        },
+      })
+      expect(injectRes.statusCode).toBe(200)
+      const result = injectRes.json() as { stdout: string; exitCode: number | null }
+      expect(result.exitCode).toBe(0)
+
+      // All occurrences should be redacted
+      const redactedCount = (result.stdout.match(/\[REDACTED\]/g) || []).length
+      expect(redactedCount).toBe(3)
+      expect(result.stdout).not.toContain('secret-value')
+    })
+
+    it('secret substring appearing in output is handled correctly', async () => {
+      const headers = { authorization: `Bearer ${sessionToken}` }
+
+      // Add a secret that's a common word
+      const substringUuid = (await service.secrets.add('common-key', 'test', [])).uuid
+
+      const reqRes = await server.inject({
+        method: 'POST',
+        url: '/api/requests',
+        headers,
+        payload: {
+          secretUuids: [substringUuid],
+          reason: 'substring test',
+          taskRef: 'TASK-SUB',
+        },
+      })
+      expect(reqRes.statusCode).toBe(201)
+      const { id: requestId } = reqRes.json() as { id: string }
+
+      await waitForGrant(server, requestId, headers, 'approved')
+
+      // Inject: output includes the secret as part of other text
+      const injectRes = await server.inject({
+        method: 'POST',
+        url: '/api/inject',
+        headers,
+        payload: {
+          requestId,
+          command: 'echo "running tests and $SECRET more testing"',
+          envVarName: 'SECRET',
+        },
+      })
+      expect(injectRes.statusCode).toBe(200)
+      const result = injectRes.json() as { stdout: string; exitCode: number | null }
+      expect(result.exitCode).toBe(0)
+
+      // The literal secret value should be redacted
+      // Note: "test" in "tests" and "testing" may or may not be redacted depending on implementation
+      expect(result.stdout).toContain('[REDACTED]')
     })
   })
 })

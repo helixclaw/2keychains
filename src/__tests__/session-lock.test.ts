@@ -191,6 +191,37 @@ describe('SessionLock', () => {
 
       expect(() => sessionLock.touch()).not.toThrow()
     })
+
+    it('returns early when session file has invalid version', () => {
+      const sessionLock = new SessionLock(config, sessionPath)
+      const dek = Buffer.alloc(32, 0xab)
+      sessionLock.save(dek)
+
+      // Corrupt the version
+      const data = JSON.parse(readFileSync(sessionPath, 'utf-8'))
+      const originalLastAccessAt = data.lastAccessAt
+      data.version = 99
+      writeFileSync(sessionPath, JSON.stringify(data))
+
+      // touch() should return early without modifying the file
+      sessionLock.touch()
+
+      const dataAfter = JSON.parse(readFileSync(sessionPath, 'utf-8'))
+      expect(dataAfter.lastAccessAt).toBe(originalLastAccessAt)
+      expect(dataAfter.version).toBe(99)
+    })
+
+    it('handles errors during touch gracefully', () => {
+      const sessionLock = new SessionLock(config, sessionPath)
+      const dek = Buffer.alloc(32, 0xab)
+      sessionLock.save(dek)
+
+      // Corrupt the file so JSON.parse fails
+      writeFileSync(sessionPath, 'not valid json{{{')
+
+      // touch() should not throw
+      expect(() => sessionLock.touch()).not.toThrow()
+    })
   })
 
   describe('exists()', () => {

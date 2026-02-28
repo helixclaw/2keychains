@@ -30,7 +30,7 @@ const mockChmodSync = vi.mocked(chmodSync)
 function createValidConfig(overrides?: Partial<AppConfig>): AppConfig {
   return {
     mode: 'standalone',
-    server: { host: '127.0.0.1', port: 2274 },
+    server: { host: '127.0.0.1', port: 2274, pollIntervalMs: 3000 },
     store: { path: '~/.2kc/secrets.json' },
     discord: {
       botToken: 'bot-token-1234567890',
@@ -96,7 +96,7 @@ describe('config init action', () => {
     const writtenJson = mockWriteFileSync.mock.calls[0][1] as string
     const writtenConfig = JSON.parse(writtenJson) as AppConfig
     expect(writtenConfig.mode).toBe('standalone')
-    expect(writtenConfig.server).toEqual({ host: '127.0.0.1', port: 2274 })
+    expect(writtenConfig.server).toEqual({ host: '127.0.0.1', port: 2274, pollIntervalMs: 3000 })
     expect(writtenConfig.store).toEqual({ path: join(CONFIG_DIR, 'secrets.json') })
   })
 
@@ -224,7 +224,7 @@ describe('config init action', () => {
     const writtenConfig = JSON.parse(writtenJson) as AppConfig
     expect(writtenConfig).toEqual({
       mode: 'client',
-      server: { host: '10.0.0.1', port: 3000, authToken: 'tok123' },
+      server: { host: '10.0.0.1', port: 3000, authToken: 'tok123', pollIntervalMs: 3000 },
       store: { path: '/my/store.json' },
       unlock: defaultConfig().unlock,
       discord: {

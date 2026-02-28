@@ -1,7 +1,8 @@
-import { randomUUID, sign } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import type { KeyObject } from 'node:crypto'
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { SignJWT, importPKCS8 } from 'jose'
 import { CONFIG_DIR } from './config.js'
 import type { AccessRequest } from './request.js'
 
@@ -30,7 +31,9 @@ export class GrantManager {
     this.load()
   }
 
-  createGrant(request: AccessRequest): { grant: AccessGrant; jws: string | undefined } {
+  async createGrant(
+    request: AccessRequest,
+  ): Promise<{ grant: AccessGrant; jws: string | undefined }> {
     if (request.status !== 'approved') {
       throw new Error(`Cannot create grant for request with status: ${request.status}`)
     }
@@ -48,7 +51,7 @@ export class GrantManager {
 
     let jws: string | undefined
     if (this.privateKey) {
-      jws = signGrant(grant, this.privateKey)
+      jws = await signGrant(grant, this.privateKey)
       grant.jws = jws
     }
 
@@ -137,13 +140,17 @@ export class GrantManager {
   }
 }
 
-function signGrant(grant: AccessGrant, privateKey: KeyObject): string {
-  const header = Buffer.from(JSON.stringify({ alg: 'EdDSA' })).toString('base64url')
+async function keyObjectToCryptoKey(keyObject: KeyObject): Promise<CryptoKey> {
+  const pem = keyObject.export({ type: 'pkcs8', format: 'pem' }) as string
+  return importPKCS8(pem, 'EdDSA')
+}
+
+async function signGrant(grant: AccessGrant, privateKey: KeyObject): Promise<string> {
+  const cryptoKey = await keyObjectToCryptoKey(privateKey)
   // Omit the jws field so the signature doesn't cover itself
+  // Rename 'id' to 'grantId' to match GrantVerifier's expected payload shape
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { jws: _, ...grantWithoutJws } = grant
-  const payload = Buffer.from(JSON.stringify(grantWithoutJws)).toString('base64url')
-  const signingInput = `${header}.${payload}`
-  const sigBytes = sign(null, Buffer.from(signingInput), privateKey)
-  return `${signingInput}.${sigBytes.toString('base64url')}`
+  const { jws: _, id, ...rest } = grant
+
+  return new SignJWT({ grantId: id, ...rest }).setProtectedHeader({ alg: 'EdDSA' }).sign(cryptoKey)
 }

@@ -271,6 +271,20 @@ describe('secrets add command', () => {
     expect(process.exitCode).toBe(1)
     errorSpy.mockRestore()
   })
+
+  it('handles non-Error rejection in add command', async () => {
+    mockSecretsAdd.mockRejectedValue('raw string error')
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { secretsCommand } = await import('../cli/secrets.js')
+    await secretsCommand.parseAsync(['add', '--ref', 'my-ref', '--value', 'secret'], {
+      from: 'user',
+    })
+
+    expect(errorSpy).toHaveBeenCalledWith('Error: raw string error')
+    expect(process.exitCode).toBe(1)
+    errorSpy.mockRestore()
+  })
 })
 
 describe('secrets list command', () => {
@@ -315,6 +329,18 @@ describe('secrets list command', () => {
     expect(process.exitCode).toBe(1)
     errorSpy.mockRestore()
   })
+
+  it('handles non-Error rejection in list command', async () => {
+    mockSecretsList.mockRejectedValue('raw string error')
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { secretsCommand } = await import('../cli/secrets.js')
+    await secretsCommand.parseAsync(['list'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith('Error: raw string error')
+    expect(process.exitCode).toBe(1)
+    errorSpy.mockRestore()
+  })
 })
 
 describe('secrets remove command', () => {
@@ -356,6 +382,18 @@ describe('secrets remove command', () => {
     expect(errorSpy).toHaveBeenCalledWith('Error: Secret not found')
     expect(process.exitCode).toBe(1)
     expect(mockSecretsRemove).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+
+  it('handles non-Error rejection in remove command', async () => {
+    mockSecretsResolve.mockRejectedValue('raw string error')
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { secretsCommand } = await import('../cli/secrets.js')
+    await secretsCommand.parseAsync(['remove', 'some-ref'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith('Error: raw string error')
+    expect(process.exitCode).toBe(1)
     errorSpy.mockRestore()
   })
 })

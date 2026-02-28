@@ -4,12 +4,10 @@ import type { Service, SecretSummary } from './service.js'
 import type { SecretMetadata, ProcessResult } from './types.js'
 import type { AccessRequest, AccessRequestStatus } from './request.js'
 import type { AccessGrant } from './grant.js'
-import type { UnlockSession } from './unlock-session.js'
-import type { SecretInjector } from './injector.js'
+import type { SecretInjector, GrantSecretCache } from './injector.js'
 import { GrantVerifier } from './grant-verifier.js'
 
 export interface RemoteServiceDeps {
-  unlockSession?: UnlockSession
   injector?: SecretInjector
 }
 
@@ -181,6 +179,11 @@ export class RemoteService implements Service {
         'GET',
         `/api/grants/${encodeURIComponent(requestId)}`,
       ),
+    consume: (requestId: string) =>
+      this.request<{
+        grantId: string
+        secrets: Record<string, { uuid: string; ref: string; value: string }>
+      }>('POST', `/api/grants/${encodeURIComponent(requestId)}/consume`),
   }
 
   async inject(
@@ -188,12 +191,7 @@ export class RemoteService implements Service {
     command: string,
     options?: { envVarName?: string },
   ): Promise<ProcessResult> {
-    // 0. Check deps
-    if (!this.deps.unlockSession) {
-      throw new Error('unlockSession not configured')
-    }
-
-    // 1. Fetch signed grant JWS from server
+    // 1. Fetch signed grant JWS from server and verify
     const { jws: jwsToken } = await this.request<{ jws: string }>(
       'GET',
       `/api/grants/${encodeURIComponent(requestId)}/signed`,
@@ -201,27 +199,20 @@ export class RemoteService implements Service {
 
     // 2. Verify JWS signature + expiry, binding to this command's hash
     const commandHash = createHash('sha256').update(command).digest('hex')
-    const grantPayload = await this.grantVerifier.verifyGrant(jwsToken, commandHash)
+    await this.grantVerifier.verifyGrant(jwsToken, commandHash)
 
-    // 3. Check that local store is unlocked
-    if (!this.deps.unlockSession.isUnlocked()) {
-      throw new Error('Local store is locked. Run `2kc unlock` before requesting secrets.')
-    }
+    // 3. Consume grant and fetch all secrets from server in one atomic request
+    const { secrets } = await this.grants.consume(requestId)
 
-    if (!this.deps.injector) {
-      throw new Error('Injector not available in client mode')
-    }
-
-    // 4. Inject locally using the SecretInjector with the grant ID from the payload
-    const result = await this.deps.injector.inject(
-      grantPayload.grantId,
-      ['/bin/sh', '-c', command],
-      options,
+    // 4. Convert to Map for cache
+    const secretCache: GrantSecretCache = new Map(
+      Object.entries(secrets).map(([uuid, data]) => [uuid, data]),
     )
 
-    // 5. Record grant usage
-    this.deps.unlockSession?.recordGrantUsage()
-
-    return result
+    // 5. Run injection with pre-fetched secrets (no local store needed)
+    if (!this.deps.injector) {
+      throw new Error('Injector not available')
+    }
+    return this.deps.injector.injectWithCache(['/bin/sh', '-c', command], secretCache, options)
   }
 }

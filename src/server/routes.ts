@@ -177,6 +177,25 @@ export const routePlugin = fp(
       async (request) => service.grants.getStatus(request.params.requestId).catch(handleError),
     )
 
+    // POST /api/grants/:requestId/consume — consume grant and return all secret values
+    // This endpoint atomically validates the grant, marks it as used, and returns secrets.
+    // Can only be called once per grant (replay protection).
+    fastify.post<{ Params: { requestId: string } }>(
+      '/api/grants/:requestId/consume',
+      {
+        schema: {
+          params: {
+            type: 'object',
+            required: ['requestId'],
+            properties: {
+              requestId: { type: 'string', minLength: 1 },
+            },
+          },
+        },
+      },
+      async (request) => service.grants.consume(request.params.requestId).catch(handleError),
+    )
+
     // GET /api/grants/:requestId/signed — get signed JWS token only
     fastify.get<{ Params: { requestId: string } }>(
       '/api/grants/:requestId/signed',

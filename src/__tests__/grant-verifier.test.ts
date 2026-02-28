@@ -197,12 +197,12 @@ describe('GrantVerifier', () => {
       await expect(verifier.verifyGrant(jws)).rejects.toThrow('Grant has expired')
     })
 
-    it('rejects when expectedCommandHash provided but payload has no commandHash', async () => {
+    it('allows grant without commandHash when expectedCommandHash is provided', async () => {
+      // If grant has no commandHash (server had bindCommand: false), any command is allowed
       const jws = await makeJWS({}, privateKey) // no commandHash in payload
 
-      await expect(verifier.verifyGrant(jws, 'expected-hash')).rejects.toThrow(
-        'Grant is missing command hash',
-      )
+      const result = await verifier.verifyGrant(jws, 'expected-hash')
+      expect(result.grantId).toBe('grant-1')
     })
 
     it('rejects grant with wrong command hash when bound', async () => {

@@ -10,19 +10,11 @@ import { SecretInjector } from '../../core/injector.js'
 import { UnlockSession } from '../../core/unlock-session.js'
 import { createAccessRequest } from '../../core/request.js'
 import type { SecretStore } from '../../core/secret-store.js'
-import type { NotificationChannel } from '../../channels/channel.js'
+import { createMockChannel } from '../mocks/mock-notification-channel.js'
 
 // Low-cost scrypt params for fast tests
 const TEST_PARAMS = { N: 1024, r: 8, p: 1 }
 const PASSWORD = 'integration-test-pw'
-
-function createMockChannel(response: 'approved' | 'denied' | 'timeout'): NotificationChannel {
-  return {
-    sendApprovalRequest: vi.fn().mockResolvedValue('msg-id-123'),
-    waitForResponse: vi.fn().mockResolvedValue(response),
-    sendNotification: vi.fn().mockResolvedValue(undefined),
-  }
-}
 
 function buildWorkflowConfig(
   overrides?: Partial<{
@@ -89,7 +81,7 @@ describe('Phase 1 Local Encrypted Flow', () => {
 
       // 4. Create a grant
       const grantManager = new GrantManager()
-      const { grant } = grantManager.createGrant(request)
+      const { grant } = await grantManager.createGrant(request)
       expect(grant.secretUuids).toContain(uuid)
 
       // 5. Inject via SecretInjector — spawn real subprocess
@@ -120,7 +112,7 @@ describe('Phase 1 Local Encrypted Flow', () => {
       const request = createAccessRequest([uuid], 'test locked rejection', 'task-002')
       request.status = 'approved'
       const grantManager = new GrantManager()
-      const { grant } = grantManager.createGrant(request)
+      const { grant } = await grantManager.createGrant(request)
 
       // 3. Lock the store
       store.lock()
@@ -180,7 +172,7 @@ describe('Phase 1 Local Encrypted Flow', () => {
 
       // 4. createGrant should throw because status is 'denied'
       const grantManager = new GrantManager()
-      expect(() => grantManager.createGrant(request)).toThrow(
+      await expect(grantManager.createGrant(request)).rejects.toThrow(
         'Cannot create grant for request with status: denied',
       )
     })
@@ -201,7 +193,7 @@ describe('Phase 1 Local Encrypted Flow', () => {
 
       // 4. Create grant (expires in 30s)
       const grantManager = new GrantManager()
-      const { grant } = grantManager.createGrant(request)
+      const { grant } = await grantManager.createGrant(request)
 
       // 5. Advance past grant TTL
       vi.advanceTimersByTime(31_000)

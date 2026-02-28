@@ -1,11 +1,11 @@
 /// <reference types="vitest/globals" />
 
 import { WorkflowEngine } from '../core/workflow.js'
-import type { NotificationChannel } from '../channels/channel.js'
 import type { SecretStore } from '../core/secret-store.js'
 import type { SecretMetadata } from '../core/types.js'
 import type { AccessRequest } from '../core/request.js'
 import type { AppConfig } from '../core/config.js'
+import { createMockChannel } from './mocks/mock-notification-channel.js'
 
 function createMockStore(metadataMap: Record<string, SecretMetadata>): SecretStore {
   return {
@@ -21,13 +21,6 @@ function createSingleMockStore(metadata: SecretMetadata): SecretStore {
   return {
     getMetadata: vi.fn().mockResolvedValue(metadata),
   }
-}
-
-function createMockChannel(response: 'approved' | 'denied' | 'timeout' = 'approved') {
-  return {
-    sendApprovalRequest: vi.fn().mockResolvedValue('msg-123'),
-    waitForResponse: vi.fn().mockResolvedValue(response),
-  } satisfies NotificationChannel
 }
 
 function createRequest(overrides?: Partial<AccessRequest>): AccessRequest {

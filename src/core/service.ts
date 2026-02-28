@@ -49,6 +49,15 @@ export interface Service {
     getStatus(
       requestId: string,
     ): Promise<{ status: AccessRequestStatus; grant?: AccessGrant; jws?: string }>
+    /**
+     * Consume a grant and return all secret values in a single atomic operation.
+     * The grant is marked as used before secrets are returned (prevents replay).
+     * Used by client mode to fetch secrets from the server.
+     */
+    consume(requestId: string): Promise<{
+      grantId: string
+      secrets: Record<string, { uuid: string; ref: string; value: string }>
+    }>
   }
 
   inject(
@@ -175,13 +184,42 @@ export class LocalService implements Service {
         jws: grant?.jws,
       }
     },
+    consume: async (requestId) => {
+      if (!this.deps.unlockSession.isUnlocked()) {
+        throw new Error('Store is locked. Run `2kc unlock` first.')
+      }
+
+      const grant = this.deps.grantManager.getGrantByRequestId(requestId)
+      if (!grant) {
+        throw new Error(`No grant found for request: ${requestId}`)
+      }
+
+      // Validate grant (not expired, not already used)
+      if (!this.deps.grantManager.validateGrant(grant.id)) {
+        throw new Error('Grant is invalid, expired, or already consumed')
+      }
+
+      // Mark as used BEFORE returning secrets (prevents concurrent requests)
+      this.deps.grantManager.markUsed(grant.id)
+      this.deps.unlockSession.recordGrantUsage()
+
+      // Return all secret values covered by the grant
+      const secrets: Record<string, { uuid: string; ref: string; value: string }> = {}
+      for (const uuid of grant.secretUuids) {
+        const meta = this.deps.store.getMetadata(uuid)
+        const value = this.deps.store.getValue(uuid)
+        secrets[uuid] = { uuid, ref: meta.ref, value }
+      }
+
+      return { grantId: grant.id, secrets }
+    },
   }
 
   private async runWorkflow(request: AccessRequest): Promise<void> {
     const outcome = await this.deps.workflowEngine.processRequest(request)
     if (outcome === 'approved') {
       try {
-        this.deps.grantManager.createGrant(request)
+        await this.deps.grantManager.createGrant(request)
       } catch (err: unknown) {
         console.error('createGrant failed after workflow approval:', err)
         request.status = 'error'
@@ -213,12 +251,10 @@ export class LocalService implements Service {
 
 export async function resolveService(config: AppConfig): Promise<Service> {
   if (config.mode === 'client') {
-    const store = new EncryptedSecretStore(config.store.path)
-    const unlockSession = new UnlockSession(config.unlock)
-    const grantsPath = join(dirname(config.store.path), 'grants.json')
-    const grantManager = new GrantManager(grantsPath)
-    const injector = new SecretInjector(grantManager, store)
-    return new RemoteService(config.server, { unlockSession, injector })
+    // No local store needed in client mode - secrets come from server
+    // Create a minimal injector for spawning processes with pre-fetched secrets
+    const injector = new SecretInjector(null, null)
+    return new RemoteService(config.server, { injector })
   }
 
   const grantsPath = join(dirname(config.store.path), 'server-grants.json')
