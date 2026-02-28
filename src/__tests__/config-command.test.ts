@@ -27,7 +27,6 @@ function createValidConfig(overrides?: Partial<AppConfig>): AppConfig {
     server: { host: '127.0.0.1', port: 2274 },
     store: { path: '~/.2kc/secrets.json' },
     discord: {
-      webhookUrl: 'https://discord.com/api/webhooks/123/abc',
       botToken: 'bot-token-1234567890',
       channelId: '999888777',
     },
@@ -158,12 +157,12 @@ describe('config init action', () => {
     await configCommand.parseAsync(
       [
         'init',
-        '--webhook-url',
-        'https://discord.com/api/webhooks/999/xyz',
         '--bot-token',
         'my-bot-token',
         '--channel-id',
         '112233',
+        '--authorized-user-ids',
+        'user1,user2',
       ],
       { from: 'user' },
     )
@@ -172,9 +171,9 @@ describe('config init action', () => {
     const writtenJson = mockWriteFileSync.mock.calls[0][1] as string
     const writtenConfig = JSON.parse(writtenJson) as AppConfig
     expect(writtenConfig.discord).toEqual({
-      webhookUrl: 'https://discord.com/api/webhooks/999/xyz',
       botToken: 'my-bot-token',
       channelId: '112233',
+      authorizedUserIds: ['user1', 'user2'],
     })
   })
 
@@ -205,8 +204,6 @@ describe('config init action', () => {
         'tok123',
         '--store-path',
         '/my/store.json',
-        '--webhook-url',
-        'https://discord.com/api/webhooks/999/xyz',
         '--bot-token',
         'my-bot-token',
         '--channel-id',
@@ -225,7 +222,6 @@ describe('config init action', () => {
       store: { path: '/my/store.json' },
       unlock: defaultConfig().unlock,
       discord: {
-        webhookUrl: 'https://discord.com/api/webhooks/999/xyz',
         botToken: 'my-bot-token',
         channelId: '112233',
       },
@@ -345,7 +341,6 @@ describe('config show action', () => {
   it('redacts botToken (shows first 4 chars + "...")', async () => {
     const config = createValidConfig({
       discord: {
-        webhookUrl: 'https://discord.com/api/webhooks/123/abcdefghij',
         botToken: 'bot-token-1234567890',
         channelId: '999888777',
       },
@@ -360,26 +355,6 @@ describe('config show action', () => {
       discord: { botToken: string }
     }
     expect(output.discord.botToken).toBe('bot-...')
-  })
-
-  it('redacts webhookUrl (shows first 20 chars + "...")', async () => {
-    const config = createValidConfig({
-      discord: {
-        webhookUrl: 'https://discord.com/api/webhooks/123/abcdefghij',
-        botToken: 'bot-token-1234567890',
-        channelId: '999888777',
-      },
-    })
-    mockReadFileSync.mockReturnValue(JSON.stringify(config))
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
-
-    const { configCommand } = await import('../cli/config.js')
-    await configCommand.parseAsync(['show'], { from: 'user' })
-
-    const output = JSON.parse(logSpy.mock.calls[0][0] as string) as {
-      discord: { webhookUrl: string }
-    }
-    expect(output.discord.webhookUrl).toBe('https://discord.com/...')
   })
 
   it('redacts server.authToken', async () => {
@@ -443,27 +418,6 @@ describe('config show action', () => {
     logSpy.mockRestore()
   })
 
-  it('does not truncate short webhookUrl (<=20 chars)', async () => {
-    const config = createValidConfig({
-      discord: {
-        webhookUrl: 'http://short.url',
-        botToken: 'bot-token-1234567890',
-        channelId: '999888777',
-      },
-    })
-    mockReadFileSync.mockReturnValue(JSON.stringify(config))
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
-
-    const { configCommand } = await import('../cli/config.js')
-    await configCommand.parseAsync(['show'], { from: 'user' })
-
-    const output = JSON.parse(logSpy.mock.calls[0][0] as string) as {
-      discord: { webhookUrl: string }
-    }
-    expect(output.discord.webhookUrl).toBe('http://short.url')
-    logSpy.mockRestore()
-  })
-
   it('shows bindCommand field in output', async () => {
     const config = createValidConfig({ bindCommand: true } as Partial<AppConfig>)
     mockReadFileSync.mockReturnValue(JSON.stringify(config))
@@ -480,7 +434,6 @@ describe('config show action', () => {
   it('does not truncate short botToken (<=4 chars)', async () => {
     const config = createValidConfig({
       discord: {
-        webhookUrl: 'https://discord.com/api/webhooks/123/abc',
         botToken: 'tok',
         channelId: '999888777',
       },

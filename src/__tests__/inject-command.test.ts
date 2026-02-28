@@ -50,7 +50,6 @@ function createTestConfig(): AppConfig {
     server: { host: '127.0.0.1', port: 2274 },
     store: { path: '~/.2kc/secrets.json' },
     discord: {
-      webhookUrl: 'https://discord.com/api/webhooks/123/abc',
       botToken: 'bot-token-123',
       channelId: '999888777',
     },

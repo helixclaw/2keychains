@@ -40,7 +40,6 @@ describe('loadConfig', () => {
   it('should load and parse config from ~/.2kc/config.json', () => {
     const validConfig = {
       discord: {
-        webhookUrl: 'https://discord.com/api/webhooks/123/abc',
         botToken: 'bot-token-123',
         channelId: '999888777',
       },
@@ -94,7 +93,6 @@ describe('parseConfig', () => {
 
   const withDiscord = {
     discord: {
-      webhookUrl: 'https://discord.com/api/webhooks/123/abc',
       channelId: '123456',
       botToken: 'bot-token',
     },
@@ -221,30 +219,45 @@ describe('parseConfig', () => {
     expect(() => parseConfig('string')).toThrow('Config must be a JSON object')
   })
 
-  it('throws if discord.webhookUrl is missing', () => {
-    expect(() => parseConfig({ discord: { channelId: '123', botToken: 'tok' } })).toThrow(
-      'discord.webhookUrl must be a non-empty string',
-    )
-  })
-
-  it('throws if discord.webhookUrl is empty string', () => {
-    expect(() =>
-      parseConfig({ discord: { webhookUrl: '', channelId: '123', botToken: 'tok' } }),
-    ).toThrow('discord.webhookUrl must be a non-empty string')
-  })
-
   it('throws if discord.channelId is missing', () => {
-    expect(() =>
-      parseConfig({ discord: { webhookUrl: 'https://example.com', botToken: 'tok' } }),
-    ).toThrow('discord.channelId must be a non-empty string')
+    expect(() => parseConfig({ discord: { botToken: 'tok' } })).toThrow(
+      'discord.channelId must be a non-empty string',
+    )
   })
 
   it('throws if discord.botToken is empty string', () => {
     expect(() =>
       parseConfig({
-        discord: { webhookUrl: 'https://example.com', channelId: '123', botToken: '' },
+        discord: { channelId: '123', botToken: '' },
       }),
     ).toThrow('discord.botToken must be a non-empty string')
+  })
+
+  it('parses discord.authorizedUserIds when present', () => {
+    const config = parseConfig({
+      discord: {
+        channelId: '123',
+        botToken: 'tok',
+        authorizedUserIds: ['user1', 'user2'],
+      },
+    })
+    expect(config.discord?.authorizedUserIds).toEqual(['user1', 'user2'])
+  })
+
+  it('throws if discord.authorizedUserIds is not an array', () => {
+    expect(() =>
+      parseConfig({
+        discord: { channelId: '123', botToken: 'tok', authorizedUserIds: 'invalid' },
+      }),
+    ).toThrow('discord.authorizedUserIds must be an array')
+  })
+
+  it('throws if discord.authorizedUserIds contains non-string', () => {
+    expect(() =>
+      parseConfig({
+        discord: { channelId: '123', botToken: 'tok', authorizedUserIds: ['valid', 123] },
+      }),
+    ).toThrow('discord.authorizedUserIds must contain non-empty strings')
   })
 
   it('parses unlock config with custom values', () => {

@@ -18,9 +18,9 @@ config
   .option('--server-port <port>', 'Server port', '2274')
   .option('--server-auth-token <token>', 'Server auth token')
   .option('--store-path <path>', 'Secret store path', '~/.2kc/secrets.json')
-  .option('--webhook-url <url>', 'Discord webhook URL')
   .option('--bot-token <token>', 'Discord bot token')
   .option('--channel-id <id>', 'Discord channel ID')
+  .option('--authorized-user-ids <ids>', 'Comma-separated Discord user IDs authorized to approve')
   .option('--default-require-approval', 'Require approval by default', false)
   .option('--approval-timeout <ms>', 'Approval timeout in ms', '300000')
   .action(
@@ -30,9 +30,9 @@ config
       serverPort: string
       serverAuthToken?: string
       storePath: string
-      webhookUrl?: string
       botToken?: string
       channelId?: string
+      authorizedUserIds?: string
       defaultRequireApproval: boolean
       approvalTimeout: string
     }) => {
@@ -68,11 +68,18 @@ config
         },
         unlock: defaultConfig().unlock,
         discord:
-          opts.webhookUrl && opts.botToken && opts.channelId
+          opts.botToken && opts.channelId
             ? {
-                webhookUrl: opts.webhookUrl,
                 botToken: opts.botToken,
                 channelId: opts.channelId,
+                ...(opts.authorizedUserIds
+                  ? {
+                      authorizedUserIds: opts.authorizedUserIds
+                        .split(',')
+                        .map((id) => id.trim())
+                        .filter((id) => id !== ''),
+                    }
+                  : {}),
               }
             : undefined,
         requireApproval: {},
@@ -119,10 +126,6 @@ config
           appConfig.discord.botToken.length > 4
             ? appConfig.discord.botToken.slice(0, 4) + '...'
             : appConfig.discord.botToken,
-        webhookUrl:
-          appConfig.discord.webhookUrl.length > 20
-            ? appConfig.discord.webhookUrl.slice(0, 20) + '...'
-            : appConfig.discord.webhookUrl,
       }
     }
 

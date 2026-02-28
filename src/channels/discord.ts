@@ -7,9 +7,9 @@ const POLL_INTERVAL_MS = 2500
 const DISCORD_API_BASE = 'https://discord.com/api/v10'
 
 export interface DiscordChannelConfig {
-  webhookUrl: string
   botToken: string
   channelId: string
+  authorizedUserIds?: string[]
 }
 
 function formatDuration(ms: number): string {
@@ -28,14 +28,15 @@ function formatDuration(ms: number): string {
 }
 
 export class DiscordChannel implements NotificationChannel {
-  private readonly webhookUrl: string
   private readonly botToken: string
   private readonly channelId: string
+  private readonly authorizedUserIds?: string[]
+  private cachedBotUserId?: string
 
   constructor(config: DiscordChannelConfig) {
-    this.webhookUrl = config.webhookUrl
     this.botToken = config.botToken
     this.channelId = config.channelId
+    this.authorizedUserIds = config.authorizedUserIds
   }
 
   async sendApprovalRequest(request: AccessRequest): Promise<string> {
@@ -60,19 +61,28 @@ export class DiscordChannel implements NotificationChannel {
       fields,
     }
 
-    const url = `${this.webhookUrl}?wait=true`
+    const url = `${DISCORD_API_BASE}/channels/${this.channelId}/messages`
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bot ${this.botToken}`,
+      },
       body: JSON.stringify({ embeds: [embed] }),
     })
 
     if (!response.ok) {
-      throw new Error(`Discord webhook failed: ${response.status} ${response.statusText}`)
+      throw new Error(`Discord API failed: ${response.status} ${response.statusText}`)
     }
 
     const data = (await response.json()) as { id: string }
-    return data.id
+    const messageId = data.id
+
+    // Add approval reactions to the message
+    await this.addReaction(messageId, APPROVE_EMOJI)
+    await this.addReaction(messageId, DENY_EMOJI)
+
+    return messageId
   }
 
   async waitForResponse(
@@ -96,14 +106,18 @@ export class DiscordChannel implements NotificationChannel {
   }
 
   async sendNotification(message: string): Promise<void> {
-    const response = await fetch(this.webhookUrl, {
+    const url = `${DISCORD_API_BASE}/channels/${this.channelId}/messages`
+    const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bot ${this.botToken}`,
+      },
       body: JSON.stringify({ content: message }),
     })
 
     if (!response.ok) {
-      throw new Error(`Discord webhook failed: ${response.status} ${response.statusText}`)
+      throw new Error(`Discord API failed: ${response.status} ${response.statusText}`)
     }
   }
 
@@ -117,9 +131,55 @@ export class DiscordChannel implements NotificationChannel {
       if (response.status === 404) return false
       throw new Error(`Discord reactions API failed: ${response.status} ${response.statusText}`)
     }
+    const json = await response.json()
+    const users = json as { id: string }[]
 
-    const users = (await response.json()) as unknown[]
-    return users.length > 0
+    // Get the bot's user ID to filter it out
+    const botUserId = await this.getBotUserId()
+
+    // Filter out the bot's own reactions
+    const nonBotUsers = users.filter((user) => user.id !== botUserId)
+
+    // If authorizedUserIds is set, only count reactions from those users
+    if (this.authorizedUserIds && this.authorizedUserIds.length > 0) {
+      const authorizedReactions = nonBotUsers.filter((user) =>
+        this.authorizedUserIds!.includes(user.id),
+      )
+      return authorizedReactions.length > 0
+    }
+
+    return nonBotUsers.length > 0
+  }
+
+  private async getBotUserId(): Promise<string> {
+    if (this.cachedBotUserId) {
+      return this.cachedBotUserId
+    }
+
+    const url = `${DISCORD_API_BASE}/users/@me`
+    const response = await fetch(url, {
+      headers: { Authorization: `Bot ${this.botToken}` },
+    })
+
+    if (!response.ok) {
+      throw new Error(`Discord API failed: ${response.status} ${response.statusText}`)
+    }
+
+    const data = (await response.json()) as { id: string }
+    this.cachedBotUserId = data.id
+    return data.id
+  }
+
+  private async addReaction(messageId: string, emoji: string): Promise<void> {
+    const url = `${DISCORD_API_BASE}/channels/${this.channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/@me`
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: { Authorization: `Bot ${this.botToken}` },
+    })
+
+    if (!response.ok) {
+      throw new Error(`Discord API failed: ${response.status} ${response.statusText}`)
+    }
   }
 
   private sleep(ms: number): Promise<void> {

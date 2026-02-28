@@ -50,7 +50,6 @@ describe('resolveService', () => {
     const config = {
       ...defaultConfig(),
       discord: {
-        webhookUrl: 'https://discord.com/api/webhooks/123/abc',
         botToken: 'bot-token',
         channelId: '999888777',
       },

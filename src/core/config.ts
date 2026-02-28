@@ -3,9 +3,9 @@ import { resolve, dirname } from 'node:path'
 import { homedir } from 'node:os'
 
 export interface DiscordConfig {
-  webhookUrl: string
   botToken: string
   channelId: string
+  authorizedUserIds?: string[]
 }
 
 export interface ServerConfig {
@@ -67,11 +67,6 @@ function parseDiscordConfig(raw: unknown): DiscordConfig | undefined {
     throw new Error('discord must be an object')
   }
 
-  const webhookUrl = raw.webhookUrl
-  if (typeof webhookUrl !== 'string' || webhookUrl === '') {
-    throw new Error('discord.webhookUrl must be a non-empty string')
-  }
-
   const channelId = raw.channelId
   if (typeof channelId !== 'string' || channelId === '') {
     throw new Error('discord.channelId must be a non-empty string')
@@ -82,7 +77,21 @@ function parseDiscordConfig(raw: unknown): DiscordConfig | undefined {
     throw new Error('discord.botToken must be a non-empty string')
   }
 
-  return { webhookUrl, botToken, channelId }
+  const result: DiscordConfig = { botToken, channelId }
+
+  if (raw.authorizedUserIds !== undefined) {
+    if (!Array.isArray(raw.authorizedUserIds)) {
+      throw new Error('discord.authorizedUserIds must be an array')
+    }
+    for (const id of raw.authorizedUserIds) {
+      if (typeof id !== 'string' || id === '') {
+        throw new Error('discord.authorizedUserIds must contain non-empty strings')
+      }
+    }
+    result.authorizedUserIds = raw.authorizedUserIds as string[]
+  }
+
+  return result
 }
 
 function parseServerConfig(raw: unknown): ServerConfig {
