@@ -132,6 +132,7 @@ async function buildService(tmpDir: string, opts: BuildServiceOpts = {}): Promis
     requestLog,
     startTime: Date.now(),
     bindCommand: opts.bindCommand ?? false,
+    publicKey,
   })
 
   return { service, publicKey }

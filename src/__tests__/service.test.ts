@@ -127,6 +127,10 @@ function makeService() {
 
   const startTime = Date.now() - 1000
 
+  const publicKey = {
+    export: vi.fn().mockReturnValue('-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----'),
+  } as unknown as import('node:crypto').KeyObject
+
   const service = new LocalService({
     store,
     unlockSession,
@@ -137,6 +141,7 @@ function makeService() {
     requestLog,
     startTime,
     bindCommand: false,
+    publicKey,
   })
   return {
     service,
@@ -272,6 +277,9 @@ describe('LocalService', () => {
         requestLog,
         startTime,
         bindCommand: true,
+        publicKey: {
+          export: vi.fn().mockReturnValue(''),
+        } as unknown as import('node:crypto').KeyObject,
       })
       ;(workflowEngine.processRequest as MockInstance).mockImplementation(async (req) => {
         req.status = 'approved'

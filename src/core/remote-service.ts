@@ -141,6 +141,11 @@ export class RemoteService implements Service {
     return this.request<{ status: string; uptime?: number }>('GET', '/health')
   }
 
+  keys: Service['keys'] = {
+    getPublicKey: () =>
+      this.request<{ publicKey: string }>('GET', '/api/keys/public').then((r) => r.publicKey),
+  }
+
   secrets: Service['secrets'] = {
     list: () => this.request<SecretSummary[]>('GET', '/api/secrets'),
     add: (ref: string, value: string, tags?: string[]) =>
