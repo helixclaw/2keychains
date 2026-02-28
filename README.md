@@ -189,6 +189,7 @@ Config file: `~/.2kc/config.json`
 | `server.host`            | string                       | `"127.0.0.1"`               | Server bind address                                                         |
 | `server.port`            | number                       | `2274`                      | Server port                                                                 |
 | `server.authToken`       | string                       | —                           | Bearer token for client-server auth                                         |
+| `server.pollIntervalMs`  | number                       | `3000`                      | Polling interval for grant status (ms)                                      |
 | `store.path`             | string                       | `"~/.2kc/secrets.enc.json"` | Path to the secrets JSON file                                               |
 | `discord.webhookUrl`     | string                       | —                           | Discord webhook URL for approval messages                                   |
 | `discord.botToken`       | string                       | —                           | Discord bot token for reading reactions                                     |

@@ -60,6 +60,10 @@ const ServerConfigSchema = z.object({
   port: zPortNumber().default(2274),
   authToken: zNonEmptyString().optional(),
   sessionTtlMs: z.number().min(1000, 'Expected session TTL to be at least 1000 ms').optional(),
+  pollIntervalMs: z
+    .number()
+    .min(1000, 'Expected poll interval to be at least 1000 ms')
+    .default(3000), // set higher to avoid rate limiting issues with Discord bot
 })
 
 // Store config schema

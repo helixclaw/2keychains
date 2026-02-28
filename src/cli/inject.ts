@@ -77,7 +77,7 @@ const inject = new Command('inject')
         )
 
         // 6. Poll for grant status
-        const pollIntervalMs = 250
+        const pollIntervalMs = config.server.pollIntervalMs
         const maxWaitMs = 5 * 60 * 1000 // 5 minutes
         const deadline = Date.now() + maxWaitMs
         let grantResult!: Awaited<ReturnType<typeof service.grants.getStatus>>
