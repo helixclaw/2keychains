@@ -1,7 +1,7 @@
 # 2keychains
 
 ![CI](https://github.com/helixclaw/2keychains/actions/workflows/ci.yml/badge.svg)
-![Coverage](https://img.shields.io/badge/coverage-0%25-red)
+![Coverage](https://img.shields.io/badge/coverage-97%25-brightgreen)
 
 A local secret broker for AI agents. Replaces direct secret access with a controlled intermediary featuring human-readable references, approval workflows, placeholder-based injection, and output redaction.
 
