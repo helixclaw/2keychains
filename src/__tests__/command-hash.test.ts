@@ -10,12 +10,8 @@ describe('normalizeCommand', () => {
     expect(normalizeCommand('echo   hello\t\tworld')).toBe('echo hello world')
   })
 
-  it('lowercases the entire string', () => {
-    expect(normalizeCommand('ECHO HELLO')).toBe('echo hello')
-  })
-
-  it('handles combined: "  FOO   BAR  " → "foo bar"', () => {
-    expect(normalizeCommand('  FOO   BAR  ')).toBe('foo bar')
+  it('handles combined: "  FOO   BAR  " → "FOO BAR"', () => {
+    expect(normalizeCommand('  FOO   BAR  ')).toBe('FOO BAR')
   })
 
   it('throws on empty string', () => {
@@ -47,10 +43,10 @@ describe('hashCommand', () => {
   })
 
   it('round-trip: normalizeCommand then hashCommand is stable across calls', () => {
-    const input = '  ECHO   Hello World  '
+    const input = '  echo   Hello World  '
     const hash1 = hashCommand(normalizeCommand(input))
     const hash2 = hashCommand(normalizeCommand(input))
     expect(hash1).toBe(hash2)
-    expect(hash1).toBe(hashCommand('echo hello world'))
+    expect(hash1).toBe(hashCommand('echo Hello World'))
   })
 })
