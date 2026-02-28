@@ -41,10 +41,19 @@ export async function loadOrGenerateKeyPair(keyFilePath: string): Promise<Server
       return { publicKey, privateKey }
     }
     // Key file exists but is in an unrecognized format — regenerate
+    console.warn(
+      `[key-manager] Key file "${keyFilePath}" is in an unrecognized format; regenerating keypair. ` +
+        'Previously issued grants or signatures using the old key may become invalid.',
+    )
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
       // File exists but is corrupted (parse error, etc.) — regenerate
-      if (!(err instanceof SyntaxError)) {
+      if (err instanceof SyntaxError) {
+        console.warn(
+          `[key-manager] Key file "${keyFilePath}" is corrupted or not valid JSON; regenerating keypair. ` +
+            'Previously issued grants or signatures using the old key may become invalid.',
+        )
+      } else {
         throw err
       }
     }
