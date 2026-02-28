@@ -3,7 +3,7 @@ pre-commit:
   commands:
     typecheck:
       glob: '*.{ts,tsx}'
-      run: npm run build
+      run: npm run compile
     lint:
       glob: '*.{ts,tsx,js,json,md}'
       run: npm run lint
