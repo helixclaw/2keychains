@@ -92,6 +92,25 @@ describe('RemoteService', () => {
     })
   })
 
+  describe('keys', () => {
+    it('getPublicKey() calls GET /api/keys/public and returns publicKey', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(makeLoginSuccessResponse('session-1'))
+        .mockResolvedValueOnce(makeJsonResponse(200, { publicKey: '-----BEGIN PUBLIC KEY-----' }))
+      globalThis.fetch = fetchMock
+
+      const service = new RemoteService(makeConfig())
+      const result = await service.keys.getPublicKey()
+
+      expect(result).toBe('-----BEGIN PUBLIC KEY-----')
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:2274/api/keys/public',
+        expect.objectContaining({ method: 'GET' }),
+      )
+    })
+  })
+
   describe('secrets', () => {
     it('list() calls GET /api/secrets', async () => {
       const items = [{ uuid: 'a', tags: ['t1'] }]
@@ -514,6 +533,28 @@ describe('RemoteService', () => {
 
       const service = new RemoteService(makeConfig())
       await expect(service.health()).rejects.toThrow('unexpected network error')
+    })
+
+    it('handles TypeError in request() after successful login', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(makeLoginSuccessResponse('session-1'))
+        .mockRejectedValueOnce(new TypeError('network error'))
+      globalThis.fetch = fetchMock
+
+      const service = new RemoteService(makeConfig())
+      await expect(service.health()).rejects.toThrow('Server not running')
+    })
+
+    it('handles TimeoutError in request() after successful login', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(makeLoginSuccessResponse('session-1'))
+        .mockRejectedValueOnce(new DOMException('timeout', 'TimeoutError'))
+      globalThis.fetch = fetchMock
+
+      const service = new RemoteService(makeConfig())
+      await expect(service.health()).rejects.toThrow('Request timed out')
     })
 
     it('re-throws unexpected errors from login()', async () => {

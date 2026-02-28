@@ -471,4 +471,44 @@ describe('LocalService', () => {
       expect(unlockSession.off).toHaveBeenCalledWith('locked', onCall[1])
     })
   })
+
+  describe('onLocked callback', () => {
+    it('calls store.lock() and sessionLock.clear() when unlockSession emits locked', () => {
+      const { store, unlockSession, sessionLock } = makeService()
+      const onCall = (unlockSession.on as MockInstance).mock.calls[0]
+      expect(onCall[0]).toBe('locked')
+      // Invoke the registered handler
+      onCall[1]()
+      expect(store.lock).toHaveBeenCalledOnce()
+      expect(sessionLock.clear).toHaveBeenCalledOnce()
+    })
+  })
+
+  describe('createGrant error path', () => {
+    it('sets status to error when createGrant fails after workflow approval', async () => {
+      const { service, workflowEngine, grantManager } = makeService()
+      ;(workflowEngine.processRequest as MockInstance).mockImplementation(async (req) => {
+        req.status = 'approved'
+        return 'approved'
+      })
+      ;(grantManager.createGrant as MockInstance).mockImplementation(() => {
+        throw new Error('signing key unavailable')
+      })
+
+      const result = await service.requests.create(['u1'], 'need access', 'task-1', 300)
+      await vi.waitFor(() => {
+        expect(grantManager.createGrant).toHaveBeenCalled()
+      })
+      // The result's status may have been updated after the workflow ran
+      expect(result.status).toBe('error')
+    })
+  })
+
+  describe('keys', () => {
+    it('getPublicKey() returns exported PEM key', async () => {
+      const { service } = makeService()
+      const result = await service.keys.getPublicKey()
+      expect(result).toBe('-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----')
+    })
+  })
 })

@@ -406,3 +406,38 @@ describe('loadConfig edge cases', () => {
     expect(() => loadConfig()).toThrow('EACCES')
   })
 })
+
+describe('getConfig', () => {
+  let exitSpy: ReturnType<typeof vi.spyOn>
+  let errorSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    vi.resetModules()
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    exitSpy.mockRestore()
+    errorSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  it('logs ZodError message and exits on invalid config', async () => {
+    mockReadFileSync.mockReturnValue(JSON.stringify({ server: { port: 'invalid' } }))
+    const { getConfig } = await import('../core/config.js')
+    getConfig('/test/zod-error-path')
+    expect(errorSpy).toHaveBeenCalledWith('Error loading config:')
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+
+  it('logs generic error and exits on non-ZodError', async () => {
+    mockReadFileSync.mockImplementation(() => {
+      throw new Error('Permission denied')
+    })
+    const { getConfig } = await import('../core/config.js')
+    getConfig('/test/generic-error-path')
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Permission denied'))
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+})
