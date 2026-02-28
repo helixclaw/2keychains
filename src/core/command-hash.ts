@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
 export function normalizeCommand(cmd: string): string {
-  const normalized = cmd.trim().replace(/\s+/g, ' ').toLowerCase()
+  const normalized = cmd.trim().replace(/\s+/g, ' ')
   if (normalized.length === 0) {
     throw new Error('command must not be empty')
   }
