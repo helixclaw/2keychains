@@ -1,5 +1,6 @@
 import { Command } from 'commander'
 import { join } from 'node:path'
+import { z } from 'zod'
 
 import {
   loadConfig,
@@ -9,6 +10,30 @@ import {
   CONFIG_DIR,
   type AppConfig,
 } from '../core/config.js'
+
+const SERVER_PORT_ERROR_MSG = 'Invalid --server-port: must be an integer between 1 and 65535'
+const APPROVAL_TIMEOUT_ERROR_MSG =
+  'Invalid --approval-timeout: must be a positive integer (milliseconds)'
+
+const ConfigInitOptionsSchema = z.object({
+  mode: z.enum(['standalone', 'client'], 'Invalid --mode: must be "standalone" or "client"'),
+  serverHost: z.string(),
+  serverPort: z.coerce
+    .number(SERVER_PORT_ERROR_MSG)
+    .int(SERVER_PORT_ERROR_MSG)
+    .min(1, SERVER_PORT_ERROR_MSG)
+    .max(65535, SERVER_PORT_ERROR_MSG),
+  serverAuthToken: z.string().optional(),
+  storePath: z.string(),
+  botToken: z.string().optional(),
+  channelId: z.string().optional(),
+  authorizedUserIds: z.string().optional(),
+  defaultRequireApproval: z.boolean(),
+  approvalTimeout: z.coerce
+    .number(APPROVAL_TIMEOUT_ERROR_MSG)
+    .int(APPROVAL_TIMEOUT_ERROR_MSG)
+    .positive(APPROVAL_TIMEOUT_ERROR_MSG),
+})
 
 const config = new Command('config').description('Manage 2kc configuration')
 
@@ -38,45 +63,45 @@ config
       defaultRequireApproval: boolean
       approvalTimeout: string
     }) => {
-      if (opts.mode !== 'standalone' && opts.mode !== 'client') {
-        console.error('Invalid --mode: must be "standalone" or "client"')
+      const result = ConfigInitOptionsSchema.safeParse(opts)
+      if (!result.success) {
+        function formatCliError(issue: z.ZodIssue): string {
+          if (issue.path[0] === 'mode') {
+            return 'Invalid --mode: must be "standalone" or "client"'
+          }
+          return issue.message
+        }
+
+        result.error.issues.forEach((issue) => {
+          console.error(formatCliError(issue))
+        })
         process.exitCode = 1
         return
       }
 
-      const port = parseInt(opts.serverPort, 10)
-      if (Number.isNaN(port) || port < 1 || port > 65535) {
-        console.error('Invalid --server-port: must be an integer between 1 and 65535')
-        process.exitCode = 1
-        return
-      }
-
-      const approvalTimeoutMs = parseInt(opts.approvalTimeout, 10)
-      if (Number.isNaN(approvalTimeoutMs) || approvalTimeoutMs <= 0) {
-        console.error('Invalid --approval-timeout: must be a positive integer (milliseconds)')
-        process.exitCode = 1
-        return
-      }
+      const validated = result.data
 
       const appConfig: AppConfig = {
-        mode: opts.mode,
+        mode: validated.mode,
         server: {
-          host: opts.serverHost,
-          port,
-          ...(opts.serverAuthToken !== undefined ? { authToken: opts.serverAuthToken } : {}),
+          host: validated.serverHost,
+          port: validated.serverPort,
+          ...(validated.serverAuthToken !== undefined
+            ? { authToken: validated.serverAuthToken }
+            : {}),
         },
         store: {
-          path: opts.storePath,
+          path: validated.storePath,
         },
         unlock: defaultConfig().unlock,
         discord:
-          opts.botToken && opts.channelId
+          validated.botToken && validated.channelId
             ? {
-                botToken: opts.botToken,
-                channelId: opts.channelId,
-                ...(opts.authorizedUserIds
+                botToken: validated.botToken,
+                channelId: validated.channelId,
+                ...(validated.authorizedUserIds
                   ? {
-                      authorizedUserIds: opts.authorizedUserIds
+                      authorizedUserIds: validated.authorizedUserIds
                         .split(',')
                         .map((id) => id.trim())
                         .filter((id) => id !== ''),
@@ -85,8 +110,8 @@ config
               }
             : undefined,
         requireApproval: {},
-        defaultRequireApproval: opts.defaultRequireApproval,
-        approvalTimeoutMs,
+        defaultRequireApproval: validated.defaultRequireApproval,
+        approvalTimeoutMs: validated.approvalTimeout,
         bindCommand: false,
       }
 

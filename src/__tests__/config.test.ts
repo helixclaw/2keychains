@@ -15,6 +15,18 @@ vi.mock('node:os', () => ({
 
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { loadConfig, parseConfig, resolveTilde, saveConfig, defaultConfig } from '../core/config.js'
+import { ZodError } from 'zod'
+
+/** Helper to assert ZodError is thrown with a specific path */
+function expectZodErrorPath(fn: () => void, expectedPath: (string | number)[]): void {
+  try {
+    fn()
+    expect.fail('Expected ZodError to be thrown')
+  } catch (err) {
+    expect(err).toBeInstanceOf(ZodError)
+    expect((err as ZodError).issues[0].path).toEqual(expectedPath)
+  }
+}
 
 const mockReadFileSync = vi.mocked(readFileSync)
 
@@ -125,7 +137,7 @@ describe('parseConfig', () => {
   })
 
   it('throws on invalid mode value', () => {
-    expect(() => parseConfig({ mode: 'invalid' })).toThrow('mode must be "standalone" or "client"')
+    expect(() => parseConfig({ mode: 'invalid' })).toThrow(ZodError)
   })
 
   it('parses server config with defaults', () => {
@@ -145,27 +157,19 @@ describe('parseConfig', () => {
   })
 
   it('throws on invalid server.port (non-number)', () => {
-    expect(() => parseConfig({ server: { port: 'abc' } })).toThrow(
-      'server.port must be an integer between 1 and 65535',
-    )
+    expect(() => parseConfig({ server: { port: 'abc' } })).toThrow(ZodError)
   })
 
   it('throws on invalid server.port (out of range)', () => {
-    expect(() => parseConfig({ server: { port: 99999 } })).toThrow(
-      'server.port must be an integer between 1 and 65535',
-    )
+    expect(() => parseConfig({ server: { port: 99999 } })).toThrow(ZodError)
   })
 
   it('throws on invalid server.port (zero)', () => {
-    expect(() => parseConfig({ server: { port: 0 } })).toThrow(
-      'server.port must be an integer between 1 and 65535',
-    )
+    expect(() => parseConfig({ server: { port: 0 } })).toThrow(ZodError)
   })
 
   it('throws on server.authToken being empty string when provided', () => {
-    expect(() => parseConfig({ server: { authToken: '' } })).toThrow(
-      'server.authToken must be a non-empty string when provided',
-    )
+    expect(() => parseConfig({ server: { authToken: '' } })).toThrow(ZodError)
   })
 
   it('parses store.path and resolves ~ to homedir', () => {
@@ -200,37 +204,26 @@ describe('parseConfig', () => {
     expect(config.approvalTimeoutMs).toBe(60_000)
   })
 
-  it('ignores non-boolean values in requireApproval', () => {
-    const config = parseConfig({
-      ...withDiscord,
-      requireApproval: { production: true, bad: 'yes', worse: 42 },
-    })
-    expect(config.requireApproval).toEqual({ production: true })
-  })
-
-  it('defaults approvalTimeoutMs for invalid values', () => {
-    const config = parseConfig({
-      approvalTimeoutMs: -1,
-    })
-    expect(config.approvalTimeoutMs).toBe(300_000)
+  it('throws on invalid approvalTimeoutMs', () => {
+    expectZodErrorPath(() => parseConfig({ approvalTimeoutMs: -1 }), ['approvalTimeoutMs'])
   })
 
   it('throws if config is not an object', () => {
-    expect(() => parseConfig('string')).toThrow('Config must be a JSON object')
+    expect(() => parseConfig('string')).toThrow(ZodError)
   })
 
   it('throws if discord.channelId is missing', () => {
-    expect(() => parseConfig({ discord: { botToken: 'tok' } })).toThrow(
-      'discord.channelId must be a non-empty string',
+    expectZodErrorPath(
+      () => parseConfig({ discord: { botToken: 'tok' } }),
+      ['discord', 'channelId'],
     )
   })
 
   it('throws if discord.botToken is empty string', () => {
-    expect(() =>
-      parseConfig({
-        discord: { channelId: '123', botToken: '' },
-      }),
-    ).toThrow('discord.botToken must be a non-empty string')
+    expectZodErrorPath(
+      () => parseConfig({ discord: { channelId: '123', botToken: '' } }),
+      ['discord', 'botToken'],
+    )
   })
 
   it('parses discord.authorizedUserIds when present', () => {
@@ -245,19 +238,23 @@ describe('parseConfig', () => {
   })
 
   it('throws if discord.authorizedUserIds is not an array', () => {
-    expect(() =>
-      parseConfig({
-        discord: { channelId: '123', botToken: 'tok', authorizedUserIds: 'invalid' },
-      }),
-    ).toThrow('discord.authorizedUserIds must be an array')
+    expectZodErrorPath(
+      () =>
+        parseConfig({
+          discord: { channelId: '123', botToken: 'tok', authorizedUserIds: 'invalid' },
+        }),
+      ['discord', 'authorizedUserIds'],
+    )
   })
 
   it('throws if discord.authorizedUserIds contains non-string', () => {
-    expect(() =>
-      parseConfig({
-        discord: { channelId: '123', botToken: 'tok', authorizedUserIds: ['valid', 123] },
-      }),
-    ).toThrow('discord.authorizedUserIds must contain non-empty strings')
+    expectZodErrorPath(
+      () =>
+        parseConfig({
+          discord: { channelId: '123', botToken: 'tok', authorizedUserIds: ['valid', 123] },
+        }),
+      ['discord', 'authorizedUserIds', 1],
+    )
   })
 
   it('parses unlock config with custom values', () => {
@@ -277,54 +274,44 @@ describe('parseConfig', () => {
   })
 
   it('validates unlock.ttlMs is positive number', () => {
-    expect(() => parseConfig({ unlock: { ttlMs: -1 } })).toThrow(
-      'unlock.ttlMs must be a positive number',
-    )
-    expect(() => parseConfig({ unlock: { ttlMs: 0 } })).toThrow(
-      'unlock.ttlMs must be a positive number',
-    )
-    expect(() => parseConfig({ unlock: { ttlMs: 'bad' } })).toThrow(
-      'unlock.ttlMs must be a positive number',
-    )
+    expectZodErrorPath(() => parseConfig({ unlock: { ttlMs: -1 } }), ['unlock', 'ttlMs'])
+    expectZodErrorPath(() => parseConfig({ unlock: { ttlMs: 0 } }), ['unlock', 'ttlMs'])
+    expectZodErrorPath(() => parseConfig({ unlock: { ttlMs: 'bad' } }), ['unlock', 'ttlMs'])
   })
 
   it('validates unlock.idleTtlMs is positive number when provided', () => {
-    expect(() => parseConfig({ unlock: { idleTtlMs: -1 } })).toThrow(
-      'unlock.idleTtlMs must be a positive number',
-    )
+    expectZodErrorPath(() => parseConfig({ unlock: { idleTtlMs: -1 } }), ['unlock', 'idleTtlMs'])
   })
 
   it('validates unlock.maxGrantsBeforeRelock is positive integer when provided', () => {
-    expect(() => parseConfig({ unlock: { maxGrantsBeforeRelock: 0 } })).toThrow(
-      'unlock.maxGrantsBeforeRelock must be a positive integer',
+    expectZodErrorPath(
+      () => parseConfig({ unlock: { maxGrantsBeforeRelock: 0 } }),
+      ['unlock', 'maxGrantsBeforeRelock'],
     )
-    expect(() => parseConfig({ unlock: { maxGrantsBeforeRelock: 1.5 } })).toThrow(
-      'unlock.maxGrantsBeforeRelock must be a positive integer',
+    expectZodErrorPath(
+      () => parseConfig({ unlock: { maxGrantsBeforeRelock: 1.5 } }),
+      ['unlock', 'maxGrantsBeforeRelock'],
     )
   })
 
   it('throws if unlock is not an object', () => {
-    expect(() => parseConfig({ unlock: 'bad' })).toThrow('unlock must be an object')
+    expectZodErrorPath(() => parseConfig({ unlock: 'bad' }), ['unlock'])
   })
 
   it('throws if store.path is empty string', () => {
-    expect(() => parseConfig({ store: { path: '' } })).toThrow(
-      'store.path must be a non-empty string',
-    )
+    expectZodErrorPath(() => parseConfig({ store: { path: '' } }), ['store', 'path'])
   })
 
   it('throws if store.path is non-string', () => {
-    expect(() => parseConfig({ store: { path: 123 } })).toThrow(
-      'store.path must be a non-empty string',
-    )
+    expectZodErrorPath(() => parseConfig({ store: { path: 123 } }), ['store', 'path'])
   })
 
   it('throws if store is not an object', () => {
-    expect(() => parseConfig({ store: 'bad' })).toThrow('store must be an object')
+    expectZodErrorPath(() => parseConfig({ store: 'bad' }), ['store'])
   })
 
   it('throws if server is not an object', () => {
-    expect(() => parseConfig({ server: 'bad' })).toThrow('server must be an object')
+    expectZodErrorPath(() => parseConfig({ server: 'bad' }), ['server'])
   })
 
   it('parses server.sessionTtlMs when provided', () => {
@@ -338,25 +325,26 @@ describe('parseConfig', () => {
   })
 
   it('throws on server.sessionTtlMs below minimum (1000ms)', () => {
-    expect(() => parseConfig({ server: { sessionTtlMs: 0 } })).toThrow(
-      'server.sessionTtlMs must be at least 1000ms',
+    expectZodErrorPath(
+      () => parseConfig({ server: { sessionTtlMs: 0 } }),
+      ['server', 'sessionTtlMs'],
     )
-    expect(() => parseConfig({ server: { sessionTtlMs: -1 } })).toThrow(
-      'server.sessionTtlMs must be at least 1000ms',
+    expectZodErrorPath(
+      () => parseConfig({ server: { sessionTtlMs: -1 } }),
+      ['server', 'sessionTtlMs'],
     )
-    expect(() => parseConfig({ server: { sessionTtlMs: 999 } })).toThrow(
-      'server.sessionTtlMs must be at least 1000ms',
+    expectZodErrorPath(
+      () => parseConfig({ server: { sessionTtlMs: 999 } }),
+      ['server', 'sessionTtlMs'],
     )
   })
 
   it('throws if server.host is empty string', () => {
-    expect(() => parseConfig({ server: { host: '' } })).toThrow(
-      'server.host must be a non-empty string',
-    )
+    expectZodErrorPath(() => parseConfig({ server: { host: '' } }), ['server', 'host'])
   })
 
   it('throws if discord is not an object', () => {
-    expect(() => parseConfig({ discord: 'bad' })).toThrow('discord must be an object')
+    expectZodErrorPath(() => parseConfig({ discord: 'bad' }), ['discord'])
   })
 
   it('parses bindCommand: true correctly', () => {
@@ -371,11 +359,6 @@ describe('parseConfig', () => {
 
   it('defaults bindCommand to false when missing', () => {
     const config = parseConfig({})
-    expect(config.bindCommand).toBe(false)
-  })
-
-  it('defaults bindCommand to false for non-boolean value', () => {
-    const config = parseConfig({ bindCommand: 'yes' })
     expect(config.bindCommand).toBe(false)
   })
 })
