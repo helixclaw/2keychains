@@ -59,6 +59,17 @@ describe('PidManager', () => {
       expect(readPid()).toBeNull()
     })
 
+    it('re-throws non-ENOENT errors', async () => {
+      const err = new Error('EACCES') as NodeJS.ErrnoException
+      err.code = 'EACCES'
+      mockReadFileSync.mockImplementation(() => {
+        throw err
+      })
+      const { readPid } = await import('../core/pid-manager.js')
+
+      expect(() => readPid()).toThrow('EACCES')
+    })
+
     it('returns null and cleans up when file contains invalid data', async () => {
       mockReadFileSync.mockReturnValue('not-a-number')
       const { readPid } = await import('../core/pid-manager.js')
@@ -125,6 +136,17 @@ describe('PidManager', () => {
       const { removePidFile } = await import('../core/pid-manager.js')
 
       expect(() => removePidFile()).not.toThrow()
+    })
+
+    it('re-throws non-ENOENT errors', async () => {
+      const err = new Error('EACCES') as NodeJS.ErrnoException
+      err.code = 'EACCES'
+      mockUnlinkSync.mockImplementation(() => {
+        throw err
+      })
+      const { removePidFile } = await import('../core/pid-manager.js')
+
+      expect(() => removePidFile()).toThrow('EACCES')
     })
   })
 

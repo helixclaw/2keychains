@@ -1,12 +1,34 @@
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
-import type { AppConfig } from '../core/config.js'
+import { randomBytes } from 'node:crypto'
 
-export function createServer(): FastifyInstance {
+import Fastify, { type FastifyError, type FastifyInstance } from 'fastify'
+
+import type { AppConfig } from '../core/config.js'
+import type { Service } from '../core/service.js'
+import { bearerAuthPlugin } from './auth.js'
+import { routePlugin } from './routes.js'
+
+export function createServer(
+  service: Service,
+  authToken: string,
+  opts?: { sessionTtlMs?: number },
+): FastifyInstance {
+  // sessionSecret is regenerated per server instance — sessions intentionally
+  // invalidate on server restart (ephemeral by design).
+  const sessionSecret = randomBytes(32)
+  const sessionTtlMs = opts?.sessionTtlMs ?? 3_600_000
+
   const server = Fastify({
     logger: {
       level: 'info',
     },
   })
+
+  server.register(bearerAuthPlugin, {
+    authToken,
+    sessionSecret,
+    sessionTtlMs,
+  })
+  server.register(routePlugin, { service })
 
   server.get('/health', async () => {
     return { status: 'ok', uptime: process.uptime() }
@@ -25,8 +47,14 @@ export function createServer(): FastifyInstance {
   return server
 }
 
-export async function startServer(config: AppConfig): Promise<FastifyInstance> {
-  const server = createServer()
+export async function startServer(config: AppConfig, service: Service): Promise<FastifyInstance> {
+  if (!config.server.authToken) {
+    throw new Error(
+      'server.authToken must be configured. Run `2kc server token generate` to create one.',
+    )
+  }
+
+  const server = createServer(service, config.server.authToken)
 
   const shutdown = async () => {
     server.log.info('Shutting down server...')

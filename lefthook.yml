@@ -3,13 +3,11 @@ pre-commit:
   commands:
     typecheck:
       glob: '*.{ts,tsx}'
-      run: npm run build
+      run: npm run compile
     lint:
       glob: '*.{ts,tsx,js,json,md}'
       run: npm run lint
-    coverage:
-      glob: '*.{ts,tsx}'
-      run: npm run test:coverage
+      stage_fixed: true
     test:
       glob: '*.{ts,tsx}'
       run: npm run test

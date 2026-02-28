@@ -14,7 +14,13 @@ vi.mock('node:os', () => ({
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { saveConfig, defaultConfig, CONFIG_PATH, type AppConfig } from '../core/config.js'
+import {
+  saveConfig,
+  defaultConfig,
+  CONFIG_PATH,
+  CONFIG_DIR,
+  type AppConfig,
+} from '../core/config.js'
 
 const mockReadFileSync = vi.mocked(readFileSync)
 const mockWriteFileSync = vi.mocked(writeFileSync)
@@ -24,10 +30,9 @@ const mockChmodSync = vi.mocked(chmodSync)
 function createValidConfig(overrides?: Partial<AppConfig>): AppConfig {
   return {
     mode: 'standalone',
-    server: { host: '127.0.0.1', port: 2274 },
+    server: { host: '127.0.0.1', port: 2274, pollIntervalMs: 3000 },
     store: { path: '~/.2kc/secrets.json' },
     discord: {
-      webhookUrl: 'https://discord.com/api/webhooks/123/abc',
       botToken: 'bot-token-1234567890',
       channelId: '999888777',
     },
@@ -91,8 +96,8 @@ describe('config init action', () => {
     const writtenJson = mockWriteFileSync.mock.calls[0][1] as string
     const writtenConfig = JSON.parse(writtenJson) as AppConfig
     expect(writtenConfig.mode).toBe('standalone')
-    expect(writtenConfig.server).toEqual({ host: '127.0.0.1', port: 2274 })
-    expect(writtenConfig.store).toEqual({ path: '~/.2kc/secrets.json' })
+    expect(writtenConfig.server).toEqual({ host: '127.0.0.1', port: 2274, pollIntervalMs: 3000 })
+    expect(writtenConfig.store).toEqual({ path: join(CONFIG_DIR, 'secrets.json') })
   })
 
   it('accepts --mode client flag', async () => {
@@ -158,12 +163,12 @@ describe('config init action', () => {
     await configCommand.parseAsync(
       [
         'init',
-        '--webhook-url',
-        'https://discord.com/api/webhooks/999/xyz',
         '--bot-token',
         'my-bot-token',
         '--channel-id',
         '112233',
+        '--authorized-user-ids',
+        'user1,user2',
       ],
       { from: 'user' },
     )
@@ -172,9 +177,9 @@ describe('config init action', () => {
     const writtenJson = mockWriteFileSync.mock.calls[0][1] as string
     const writtenConfig = JSON.parse(writtenJson) as AppConfig
     expect(writtenConfig.discord).toEqual({
-      webhookUrl: 'https://discord.com/api/webhooks/999/xyz',
       botToken: 'my-bot-token',
       channelId: '112233',
+      authorizedUserIds: ['user1', 'user2'],
     })
   })
 
@@ -205,8 +210,6 @@ describe('config init action', () => {
         'tok123',
         '--store-path',
         '/my/store.json',
-        '--webhook-url',
-        'https://discord.com/api/webhooks/999/xyz',
         '--bot-token',
         'my-bot-token',
         '--channel-id',
@@ -221,17 +224,17 @@ describe('config init action', () => {
     const writtenConfig = JSON.parse(writtenJson) as AppConfig
     expect(writtenConfig).toEqual({
       mode: 'client',
-      server: { host: '10.0.0.1', port: 3000, authToken: 'tok123' },
+      server: { host: '10.0.0.1', port: 3000, authToken: 'tok123', pollIntervalMs: 3000 },
       store: { path: '/my/store.json' },
       unlock: defaultConfig().unlock,
       discord: {
-        webhookUrl: 'https://discord.com/api/webhooks/999/xyz',
         botToken: 'my-bot-token',
         channelId: '112233',
       },
       requireApproval: {},
       defaultRequireApproval: false,
       approvalTimeoutMs: 60_000,
+      bindCommand: false,
     })
   })
 
@@ -344,7 +347,6 @@ describe('config show action', () => {
   it('redacts botToken (shows first 4 chars + "...")', async () => {
     const config = createValidConfig({
       discord: {
-        webhookUrl: 'https://discord.com/api/webhooks/123/abcdefghij',
         botToken: 'bot-token-1234567890',
         channelId: '999888777',
       },
@@ -359,26 +361,6 @@ describe('config show action', () => {
       discord: { botToken: string }
     }
     expect(output.discord.botToken).toBe('bot-...')
-  })
-
-  it('redacts webhookUrl (shows first 20 chars + "...")', async () => {
-    const config = createValidConfig({
-      discord: {
-        webhookUrl: 'https://discord.com/api/webhooks/123/abcdefghij',
-        botToken: 'bot-token-1234567890',
-        channelId: '999888777',
-      },
-    })
-    mockReadFileSync.mockReturnValue(JSON.stringify(config))
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
-
-    const { configCommand } = await import('../cli/config.js')
-    await configCommand.parseAsync(['show'], { from: 'user' })
-
-    const output = JSON.parse(logSpy.mock.calls[0][0] as string) as {
-      discord: { webhookUrl: string }
-    }
-    expect(output.discord.webhookUrl).toBe('https://discord.com/...')
   })
 
   it('redacts server.authToken', async () => {
@@ -442,31 +424,22 @@ describe('config show action', () => {
     logSpy.mockRestore()
   })
 
-  it('does not truncate short webhookUrl (<=20 chars)', async () => {
-    const config = createValidConfig({
-      discord: {
-        webhookUrl: 'http://short.url',
-        botToken: 'bot-token-1234567890',
-        channelId: '999888777',
-      },
-    })
+  it('shows bindCommand field in output', async () => {
+    const config = createValidConfig({ bindCommand: true } as Partial<AppConfig>)
     mockReadFileSync.mockReturnValue(JSON.stringify(config))
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
 
     const { configCommand } = await import('../cli/config.js')
     await configCommand.parseAsync(['show'], { from: 'user' })
 
-    const output = JSON.parse(logSpy.mock.calls[0][0] as string) as {
-      discord: { webhookUrl: string }
-    }
-    expect(output.discord.webhookUrl).toBe('http://short.url')
+    const output = JSON.parse(logSpy.mock.calls[0][0] as string) as Record<string, unknown>
+    expect(output).toHaveProperty('bindCommand', true)
     logSpy.mockRestore()
   })
 
   it('does not truncate short botToken (<=4 chars)', async () => {
     const config = createValidConfig({
       discord: {
-        webhookUrl: 'https://discord.com/api/webhooks/123/abc',
         botToken: 'tok',
         channelId: '999888777',
       },

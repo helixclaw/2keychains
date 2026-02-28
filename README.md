@@ -120,6 +120,30 @@ Options:
 - `--cmd` (required) — Command to run with secrets injected
 - `--duration <seconds>` — Grant validity (default: 300, range: 30–3600)
 
+### Inject command
+
+For workflows with multiple secrets, use the `inject` command which scans environment variables for `2k://` placeholders:
+
+```bash
+# Set env vars with secret placeholders
+export DB_PASS="2k://db-password"
+export API_KEY="2k://api-key-prod"
+
+# Inject all found placeholders
+2kc inject --reason "Deploy" --task "DEPLOY-123" --cmd "./deploy.sh"
+
+# Only inject specific vars
+2kc inject --vars "DB_PASS,API_KEY" --reason "test" --task "T-1" --cmd "./run.sh"
+```
+
+Options:
+
+- `--reason` (required) — Justification for access
+- `--task` (required) — Task/ticket reference
+- `--cmd` (required) — Command to run with secrets injected
+- `--vars <varList>` — Comma-separated list of env var names to check (default: scan all)
+- `--duration <seconds>` — Grant validity (default: 300)
+
 ### 6. View configuration
 
 ```bash
@@ -159,19 +183,20 @@ Config file: `~/.2kc/config.json`
 
 ### Config Fields
 
-| Field                    | Type                         | Default                 | Description                                                                 |
-| ------------------------ | ---------------------------- | ----------------------- | --------------------------------------------------------------------------- |
-| `mode`                   | `"standalone"` \| `"client"` | `"standalone"`          | Operating mode. Standalone runs locally; client connects to a remote server |
-| `server.host`            | string                       | `"127.0.0.1"`           | Server bind address                                                         |
-| `server.port`            | number                       | `2274`                  | Server port                                                                 |
-| `server.authToken`       | string                       | —                       | Bearer token for client-server auth                                         |
-| `store.path`             | string                       | `"~/.2kc/secrets.json"` | Path to the secrets JSON file                                               |
-| `discord.webhookUrl`     | string                       | —                       | Discord webhook URL for approval messages                                   |
-| `discord.botToken`       | string                       | —                       | Discord bot token for reading reactions                                     |
-| `discord.channelId`      | string                       | —                       | Discord channel ID for approval polling                                     |
-| `requireApproval`        | object                       | `{}`                    | Tag → boolean map. Tags set to `true` require human approval                |
-| `defaultRequireApproval` | boolean                      | `false`                 | Default approval requirement for untagged secrets                           |
-| `approvalTimeoutMs`      | number                       | `300000`                | How long to wait for approval (ms)                                          |
+| Field                    | Type                         | Default                     | Description                                                                 |
+| ------------------------ | ---------------------------- | --------------------------- | --------------------------------------------------------------------------- |
+| `mode`                   | `"standalone"` \| `"client"` | `"standalone"`              | Operating mode. Standalone runs locally; client connects to a remote server |
+| `server.host`            | string                       | `"127.0.0.1"`               | Server bind address                                                         |
+| `server.port`            | number                       | `2274`                      | Server port                                                                 |
+| `server.authToken`       | string                       | —                           | Bearer token for client-server auth                                         |
+| `server.pollIntervalMs`  | number                       | `3000`                      | Polling interval for grant status (ms)                                      |
+| `store.path`             | string                       | `"~/.2kc/secrets.enc.json"` | Path to the secrets JSON file                                               |
+| `discord.webhookUrl`     | string                       | —                           | Discord webhook URL for approval messages                                   |
+| `discord.botToken`       | string                       | —                           | Discord bot token for reading reactions                                     |
+| `discord.channelId`      | string                       | —                           | Discord channel ID for approval polling                                     |
+| `requireApproval`        | object                       | `{}`                        | Tag → boolean map. Tags set to `true` require human approval                |
+| `defaultRequireApproval` | boolean                      | `false`                     | Default approval requirement for untagged secrets                           |
+| `approvalTimeoutMs`      | number                       | `300000`                    | How long to wait for approval (ms)                                          |
 
 ## Server Mode
 

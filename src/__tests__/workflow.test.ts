@@ -1,11 +1,11 @@
 /// <reference types="vitest/globals" />
 
 import { WorkflowEngine } from '../core/workflow.js'
-import type { NotificationChannel } from '../channels/channel.js'
 import type { SecretStore } from '../core/secret-store.js'
 import type { SecretMetadata } from '../core/types.js'
 import type { AccessRequest } from '../core/request.js'
 import type { AppConfig } from '../core/config.js'
+import { createMockChannel } from './mocks/mock-notification-channel.js'
 
 function createMockStore(metadataMap: Record<string, SecretMetadata>): SecretStore {
   return {
@@ -21,13 +21,6 @@ function createSingleMockStore(metadata: SecretMetadata): SecretStore {
   return {
     getMetadata: vi.fn().mockResolvedValue(metadata),
   }
-}
-
-function createMockChannel(response: 'approved' | 'denied' | 'timeout' = 'approved') {
-  return {
-    sendApprovalRequest: vi.fn().mockResolvedValue('msg-123'),
-    waitForResponse: vi.fn().mockResolvedValue(response),
-  } satisfies NotificationChannel
 }
 
 function createRequest(overrides?: Partial<AccessRequest>): AccessRequest {
@@ -227,6 +220,42 @@ describe('WorkflowEngine', () => {
       expect(result).toBe('approved')
       expect(request.status).toBe('approved')
       expect(channel.sendApprovalRequest).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('processRequest - commandHash forwarding', () => {
+    it('forwards commandHash to channel request when present on canonical request', async () => {
+      const store = createSingleMockStore({
+        uuid: 'secret-uuid-1',
+        ref: 'db-password',
+        tags: ['production'],
+      })
+      const channel = createMockChannel('approved')
+      const engine = new WorkflowEngine({ store, channel, config: createConfig() })
+      const request = createRequest({ commandHash: 'abc123hash' })
+
+      await engine.processRequest(request)
+
+      expect(channel.sendApprovalRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ commandHash: 'abc123hash' }),
+      )
+    })
+
+    it('forwards command to channel request when present on canonical request', async () => {
+      const store = createSingleMockStore({
+        uuid: 'secret-uuid-1',
+        ref: 'db-password',
+        tags: ['production'],
+      })
+      const channel = createMockChannel('approved')
+      const engine = new WorkflowEngine({ store, channel, config: createConfig() })
+      const request = createRequest({ command: 'echo hello', commandHash: 'abc123hash' })
+
+      await engine.processRequest(request)
+
+      expect(channel.sendApprovalRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ command: 'echo hello', commandHash: 'abc123hash' }),
+      )
     })
   })
 

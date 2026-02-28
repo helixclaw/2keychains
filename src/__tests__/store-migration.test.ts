@@ -92,6 +92,20 @@ describe('migrateStore', () => {
     ).rejects.toThrow()
   })
 
+  it('throws on invalid plaintext store format (secrets is not an array)', async () => {
+    writeFileSync(plaintextPath, JSON.stringify({ secrets: 'not-an-array' }), 'utf-8')
+    await expect(
+      migrateStore(plaintextPath, encryptedPath, PASSWORD, { params: TEST_PARAMS }),
+    ).rejects.toThrow('Invalid plaintext store format')
+  })
+
+  it('throws on invalid plaintext store format (missing secrets field)', async () => {
+    writeFileSync(plaintextPath, JSON.stringify({ notSecrets: [] }), 'utf-8')
+    await expect(
+      migrateStore(plaintextPath, encryptedPath, PASSWORD, { params: TEST_PARAMS }),
+    ).rejects.toThrow('Invalid plaintext store format')
+  })
+
   it('throws if encrypted store already exists (no --force)', async () => {
     writePlaintext([])
     // Pre-create the encrypted store

@@ -1,41 +1,13 @@
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { resolve, dirname, join } from 'node:path'
 import { homedir } from 'node:os'
+import { z, ZodError } from 'zod'
+import { createErrorMap, createMessageBuilder, NonEmptyArray } from 'zod-validation-error'
 
-export interface DiscordConfig {
-  webhookUrl: string
-  botToken: string
-  channelId: string
-}
+// Resolve config directory from TKC_HOME env var, defaulting to ~/.2kc
+export const CONFIG_DIR = resolve(process.env.TKC_HOME ?? join(homedir(), '.2kc'))
 
-export interface ServerConfig {
-  host: string
-  port: number
-  authToken?: string
-}
-
-export interface StoreConfig {
-  path: string
-}
-
-export interface UnlockConfig {
-  ttlMs: number
-  idleTtlMs?: number
-  maxGrantsBeforeRelock?: number
-}
-
-export interface AppConfig {
-  mode: 'standalone' | 'client'
-  server: ServerConfig
-  store: StoreConfig
-  unlock: UnlockConfig
-  discord?: DiscordConfig
-  requireApproval: Record<string, boolean>
-  defaultRequireApproval: boolean
-  approvalTimeoutMs: number
-}
-
-export const CONFIG_PATH = resolve(homedir(), '.2kc', 'config.json')
+export const CONFIG_PATH = join(CONFIG_DIR, 'config.json')
 
 export function resolveTilde(p: string): string {
   if (p.startsWith('~/') || p === '~') {
@@ -44,162 +16,98 @@ export function resolveTilde(p: string): string {
   return p
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+const messageBuilderInner = createMessageBuilder({
+  includePath: true, // Includes the field path in the message
+  prefix: ' - ',
+  prefixSeparator: '', // No separator between prefix and message
+  issueSeparator: '\n - ', // Separates multiple issues with a newline
+})
+
+const messageBuilder = (issues: ZodError['issues']): string => {
+  if (issues.length === 0) {
+    return ''
+  }
+
+  // weird typescript hack to ensure issues is a NonEmptyArray
+  return messageBuilderInner(issues as NonEmptyArray<ZodError['issues'][number]>)
 }
 
-function parseRequireApproval(raw: unknown): Record<string, boolean> {
-  if (!isRecord(raw)) return {}
-  const result: Record<string, boolean> = {}
-  for (const [key, value] of Object.entries(raw)) {
-    if (typeof value === 'boolean') {
-      result[key] = value
-    }
-  }
-  return result
-}
+z.config({
+  customError: createErrorMap({
+    // includePath: true, // This option automatically adds the path
+    // delimiter: { path: ' -> ' } // Optional: customize the path delimiter
+  }),
+})
 
-function parseDiscordConfig(raw: unknown): DiscordConfig | undefined {
-  if (raw === undefined || raw === null) return undefined
-  if (!isRecord(raw)) {
-    throw new Error('discord must be an object')
-  }
+const zNonEmptyString = () => z.string().min(1, 'Expected non-empty string')
+const zPortNumber = () =>
+  z
+    .number()
+    .int()
+    .min(1, 'Expected port number between 1 and 65535')
+    .max(65535, 'Expected port number between 1 and 65535')
 
-  const webhookUrl = raw.webhookUrl
-  if (typeof webhookUrl !== 'string' || webhookUrl === '') {
-    throw new Error('discord.webhookUrl must be a non-empty string')
-  }
+// Discord config schema
+const DiscordConfigSchema = z.object({
+  botToken: zNonEmptyString(),
+  channelId: zNonEmptyString(),
+  authorizedUserIds: z.array(zNonEmptyString()).optional(),
+})
 
-  const channelId = raw.channelId
-  if (typeof channelId !== 'string' || channelId === '') {
-    throw new Error('discord.channelId must be a non-empty string')
-  }
+// Server config schema
+const ServerConfigSchema = z.object({
+  host: zNonEmptyString().default('127.0.0.1'),
+  port: zPortNumber().default(2274),
+  authToken: zNonEmptyString().optional(),
+  sessionTtlMs: z.number().min(1000, 'Expected session TTL to be at least 1000 ms').optional(),
+  pollIntervalMs: z
+    .number()
+    .min(1000, 'Expected poll interval to be at least 1000 ms')
+    .default(3000), // set higher to avoid rate limiting issues with Discord bot
+})
 
-  const botToken = raw.botToken
-  if (typeof botToken !== 'string' || botToken === '') {
-    throw new Error('discord.botToken must be a non-empty string')
-  }
+// Store config schema
+const StoreConfigSchema = z
+  .object({
+    path: zNonEmptyString().optional(),
+  })
+  .transform((val) => ({
+    path: val.path ? resolveTilde(val.path) : join(CONFIG_DIR, 'secrets.enc.json'),
+  }))
 
-  return { webhookUrl, botToken, channelId }
-}
+// Unlock config schema
+const UnlockConfigSchema = z.object({
+  ttlMs: z.number().positive().default(900_000),
+  idleTtlMs: z.number().positive().optional(),
+  maxGrantsBeforeRelock: z.number().int().positive().optional(),
+})
 
-function parseServerConfig(raw: unknown): ServerConfig {
-  const defaults: ServerConfig = { host: '127.0.0.1', port: 2274 }
-  if (raw === undefined || raw === null) return defaults
-  if (!isRecord(raw)) {
-    throw new Error('server must be an object')
-  }
+// Main app config schema
+const AppConfigSchema = z.object({
+  mode: z.enum(['standalone', 'client']).default('standalone'),
+  server: ServerConfigSchema.prefault({}),
+  store: StoreConfigSchema.prefault({}),
+  unlock: UnlockConfigSchema.prefault({}),
+  discord: DiscordConfigSchema.optional(),
+  requireApproval: z.record(z.string(), z.boolean()).default({}),
+  defaultRequireApproval: z.boolean().default(false),
+  approvalTimeoutMs: z.number().positive().default(300_000),
+  bindCommand: z.boolean().default(false),
+})
 
-  const host = raw.host !== undefined ? raw.host : defaults.host
-  if (typeof host !== 'string' || host === '') {
-    throw new Error('server.host must be a non-empty string')
-  }
-
-  const port = raw.port !== undefined ? raw.port : defaults.port
-  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error('server.port must be an integer between 1 and 65535')
-  }
-
-  const result: ServerConfig = { host, port }
-
-  if (raw.authToken !== undefined) {
-    if (typeof raw.authToken !== 'string' || raw.authToken === '') {
-      throw new Error('server.authToken must be a non-empty string when provided')
-    }
-    result.authToken = raw.authToken
-  }
-
-  return result
-}
-
-function parseStoreConfig(raw: unknown): StoreConfig {
-  const defaultPath = '~/.2kc/secrets.enc.json'
-  if (raw === undefined || raw === null) return { path: resolveTilde(defaultPath) }
-  if (!isRecord(raw)) {
-    throw new Error('store must be an object')
-  }
-
-  const path = raw.path !== undefined ? raw.path : defaultPath
-  if (typeof path !== 'string' || path === '') {
-    throw new Error('store.path must be a non-empty string')
-  }
-
-  return { path: resolveTilde(path) }
-}
-
-function parseUnlockConfig(raw: unknown): UnlockConfig {
-  const defaults: UnlockConfig = { ttlMs: 900_000 }
-  if (raw === undefined || raw === null) return defaults
-  if (!isRecord(raw)) {
-    throw new Error('unlock must be an object')
-  }
-
-  const ttlMs = raw.ttlMs !== undefined ? raw.ttlMs : defaults.ttlMs
-  if (typeof ttlMs !== 'number' || ttlMs <= 0) {
-    throw new Error('unlock.ttlMs must be a positive number')
-  }
-
-  const result: UnlockConfig = { ttlMs }
-
-  if (raw.idleTtlMs !== undefined) {
-    if (typeof raw.idleTtlMs !== 'number' || raw.idleTtlMs <= 0) {
-      throw new Error('unlock.idleTtlMs must be a positive number')
-    }
-    result.idleTtlMs = raw.idleTtlMs
-  }
-
-  if (raw.maxGrantsBeforeRelock !== undefined) {
-    if (
-      typeof raw.maxGrantsBeforeRelock !== 'number' ||
-      !Number.isInteger(raw.maxGrantsBeforeRelock) ||
-      raw.maxGrantsBeforeRelock <= 0
-    ) {
-      throw new Error('unlock.maxGrantsBeforeRelock must be a positive integer')
-    }
-    result.maxGrantsBeforeRelock = raw.maxGrantsBeforeRelock
-  }
-
-  return result
-}
+// Inferred types from schemas
+export type DiscordConfig = z.infer<typeof DiscordConfigSchema>
+export type ServerConfig = z.output<typeof ServerConfigSchema>
+export type StoreConfig = z.output<typeof StoreConfigSchema>
+export type UnlockConfig = z.output<typeof UnlockConfigSchema>
+export type AppConfig = z.output<typeof AppConfigSchema>
 
 export function defaultConfig(): AppConfig {
-  return {
-    mode: 'standalone',
-    server: { host: '127.0.0.1', port: 2274 },
-    store: { path: resolveTilde('~/.2kc/secrets.enc.json') },
-    unlock: { ttlMs: 900_000 },
-    discord: undefined,
-    requireApproval: {},
-    defaultRequireApproval: false,
-    approvalTimeoutMs: 300_000,
-  }
+  return AppConfigSchema.parse({})
 }
 
 export function parseConfig(raw: unknown): AppConfig {
-  if (!isRecord(raw)) {
-    throw new Error('Config must be a JSON object')
-  }
-
-  // Parse mode
-  const mode = raw.mode !== undefined ? raw.mode : 'standalone'
-  if (mode !== 'standalone' && mode !== 'client') {
-    throw new Error('mode must be "standalone" or "client"')
-  }
-
-  return {
-    mode,
-    server: parseServerConfig(raw.server),
-    store: parseStoreConfig(raw.store),
-    unlock: parseUnlockConfig(raw.unlock),
-    discord: parseDiscordConfig(raw.discord),
-    requireApproval: parseRequireApproval(raw.requireApproval),
-    defaultRequireApproval:
-      typeof raw.defaultRequireApproval === 'boolean' ? raw.defaultRequireApproval : false,
-    approvalTimeoutMs:
-      typeof raw.approvalTimeoutMs === 'number' && raw.approvalTimeoutMs > 0
-        ? raw.approvalTimeoutMs
-        : 300_000,
-  }
+  return AppConfigSchema.parse(raw ?? {})
 }
 
 export function loadConfig(configPath: string = CONFIG_PATH): AppConfig {
@@ -229,3 +137,41 @@ export function saveConfig(config: AppConfig, configPath: string = CONFIG_PATH):
   writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
   chmodSync(configPath, 0o600)
 }
+
+const configCache: Record<string, AppConfig> = {}
+
+export function getConfig(configPath: string = CONFIG_PATH): AppConfig {
+  if (configCache[configPath]) {
+    return configCache[configPath]
+  }
+  try {
+    configCache[configPath] = loadConfig(configPath)
+  } catch (err: unknown) {
+    if (err instanceof ZodError) {
+      console.error(`Error loading config:`)
+      console.error(messageBuilder(err.issues))
+    } else {
+      console.error(`Error loading config: ${String(err)}`)
+    }
+    process.exit(1)
+  }
+  return configCache[configPath]
+}
+
+// try {
+//   parseConfig({
+//     server: {
+//       port: 0,
+//       host: '',
+//     },
+//     defaultRequireApproval: 'not a boolean',
+//   })
+// } catch (err) {
+//   if (err instanceof ZodError) {
+//     console.error(`Error loading config:`)
+//     console.error(messageBuilder(err.issues))
+//   } else {
+//     console.error(`Error loading config: ${String(err)}`)
+//   }
+//   process.exit(1)
+// }

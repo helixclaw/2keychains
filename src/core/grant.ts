@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import type { KeyObject } from 'node:crypto'
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { homedir } from 'node:os'
+import { SignJWT, importPKCS8 } from 'jose'
+import { CONFIG_DIR } from './config.js'
 import type { AccessRequest } from './request.js'
 
 export interface AccessGrant {
@@ -12,20 +14,26 @@ export interface AccessGrant {
   expiresAt: string
   used: boolean
   revokedAt: string | null
+  commandHash?: string
+  jws?: string
 }
 
-const DEFAULT_GRANTS_PATH = join(homedir(), '.2kc', 'grants.json')
+const DEFAULT_GRANTS_PATH = join(CONFIG_DIR, 'grants.json')
 
 export class GrantManager {
   private grants: Map<string, AccessGrant> = new Map()
   private readonly grantsFilePath: string
+  private readonly privateKey: KeyObject | undefined
 
-  constructor(grantsFilePath: string = DEFAULT_GRANTS_PATH) {
+  constructor(grantsFilePath: string = DEFAULT_GRANTS_PATH, privateKey?: KeyObject) {
     this.grantsFilePath = grantsFilePath
+    this.privateKey = privateKey
     this.load()
   }
 
-  createGrant(request: AccessRequest): AccessGrant {
+  async createGrant(
+    request: AccessRequest,
+  ): Promise<{ grant: AccessGrant; jws: string | undefined }> {
     if (request.status !== 'approved') {
       throw new Error(`Cannot create grant for request with status: ${request.status}`)
     }
@@ -38,10 +46,18 @@ export class GrantManager {
       expiresAt: new Date(now + request.durationSeconds * 1000).toISOString(),
       used: false,
       revokedAt: null,
+      commandHash: request.commandHash,
     }
+
+    let jws: string | undefined
+    if (this.privateKey) {
+      jws = await signGrant(grant, this.privateKey)
+      grant.jws = jws
+    }
+
     this.grants.set(grant.id, grant)
     this.save()
-    return grant
+    return { grant, jws }
   }
 
   validateGrant(grantId: string): boolean {
@@ -122,4 +138,19 @@ export class GrantManager {
     writeFileSync(this.grantsFilePath, JSON.stringify(grants, null, 2), 'utf-8')
     chmodSync(this.grantsFilePath, 0o600)
   }
+}
+
+async function keyObjectToCryptoKey(keyObject: KeyObject): Promise<CryptoKey> {
+  const pem = keyObject.export({ type: 'pkcs8', format: 'pem' }) as string
+  return importPKCS8(pem, 'EdDSA')
+}
+
+async function signGrant(grant: AccessGrant, privateKey: KeyObject): Promise<string> {
+  const cryptoKey = await keyObjectToCryptoKey(privateKey)
+  // Omit the jws field so the signature doesn't cover itself
+  // Rename 'id' to 'grantId' to match GrantVerifier's expected payload shape
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { jws: _, id, ...rest } = grant
+
+  return new SignJWT({ grantId: id, ...rest }).setProtectedHeader({ alg: 'EdDSA' }).sign(cryptoKey)
 }

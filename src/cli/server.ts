@@ -69,14 +69,14 @@ server
     }
 
     if (opts.foreground) {
-      await import('../core/server-entry.js')
+      await import('../server/index.js')
       return
     }
 
     // Fork the server-entry as detached process
     mkdirSync(dirname(LOG_FILE_PATH), { recursive: true })
     const logFd = openSync(LOG_FILE_PATH, 'a')
-    const entryPoint = resolve(import.meta.dirname, '../core/server-entry.js')
+    const entryPoint = resolve(import.meta.url, '../server/index.js')
     const child = fork(entryPoint, [], {
       detached: true,
       stdio: ['ignore', logFd, logFd, 'ipc'],

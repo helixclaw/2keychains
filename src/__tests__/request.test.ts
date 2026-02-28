@@ -1,5 +1,8 @@
 /// <reference types="vitest/globals" />
 
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { createAccessRequest, RequestLog, type AccessRequest } from '../core/request.js'
 
 describe('createAccessRequest', () => {
@@ -176,6 +179,29 @@ describe('createAccessRequest', () => {
       expect(req.secretUuids).toEqual(['single-uuid'])
     })
   })
+
+  describe('command and commandHash fields', () => {
+    it('stores command and commandHash when provided', () => {
+      const req = createAccessRequest(
+        validArgs.secretUuids,
+        validArgs.reason,
+        validArgs.taskRef,
+        300,
+        'echo hello',
+        'abc123hash',
+      )
+
+      expect(req.command).toBe('echo hello')
+      expect(req.commandHash).toBe('abc123hash')
+    })
+
+    it('command and commandHash are undefined when not provided', () => {
+      const req = createAccessRequest(validArgs.secretUuids, validArgs.reason, validArgs.taskRef)
+
+      expect(req.command).toBeUndefined()
+      expect(req.commandHash).toBeUndefined()
+    })
+  })
 })
 
 describe('RequestLog', () => {
@@ -243,5 +269,90 @@ describe('RequestLog', () => {
     // Mutating the returned array should not affect the log
     ;(all as AccessRequest[]).length = 0
     expect(log.getAll()).toHaveLength(1)
+  })
+})
+
+describe('RequestLog file persistence', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), '2kc-request-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('save() is a no-op when no filePath provided', () => {
+    const log = new RequestLog()
+    const req = createAccessRequest(['secret-1'], 'reason', 'TASK-1')
+    log.add(req)
+    expect(() => log.save()).not.toThrow()
+  })
+
+  it('save() writes requests to file', () => {
+    const filePath = join(tmpDir, 'requests.json')
+    const log = new RequestLog(filePath)
+    const req = createAccessRequest(['secret-1'], 'reason', 'TASK-1')
+    log.add(req)
+    log.save()
+
+    expect(existsSync(filePath)).toBe(true)
+    const data = JSON.parse(readFileSync(filePath, 'utf-8')) as AccessRequest[]
+    expect(data).toHaveLength(1)
+    expect(data[0].id).toBe(req.id)
+  })
+
+  it('load() restores requests from file on construction', () => {
+    const filePath = join(tmpDir, 'requests.json')
+
+    // First log: save some requests
+    const log1 = new RequestLog(filePath)
+    const req = createAccessRequest(['secret-1'], 'reason', 'TASK-1')
+    log1.add(req)
+    log1.save()
+
+    // Second log: loads from same file
+    const log2 = new RequestLog(filePath)
+    expect(log2.size).toBe(1)
+    expect(log2.getById(req.id)?.id).toBe(req.id)
+  })
+
+  it('load() starts empty when file does not exist', () => {
+    const filePath = join(tmpDir, 'nonexistent.json')
+    const log = new RequestLog(filePath)
+    expect(log.size).toBe(0)
+  })
+
+  it('load() starts empty when file is corrupted', () => {
+    const filePath = join(tmpDir, 'corrupted.json')
+    writeFileSync(filePath, 'not valid json', 'utf-8')
+    const log = new RequestLog(filePath)
+    expect(log.size).toBe(0)
+  })
+
+  it('getById() returns live reference (mutations persist to save)', () => {
+    const filePath = join(tmpDir, 'requests.json')
+    const log = new RequestLog(filePath)
+    const req = createAccessRequest(['secret-1'], 'reason', 'TASK-1')
+    log.add(req)
+
+    // Mutate via getById reference
+    const found = log.getById(req.id)!
+    found.status = 'approved'
+    log.save()
+
+    // Reload and verify mutation was persisted
+    const log2 = new RequestLog(filePath)
+    expect(log2.getById(req.id)?.status).toBe('approved')
+  })
+
+  it('creates parent directories if they do not exist', () => {
+    const filePath = join(tmpDir, 'deep', 'nested', 'requests.json')
+    const log = new RequestLog(filePath)
+    const req = createAccessRequest(['secret-1'], 'reason', 'TASK-1')
+    log.add(req)
+    expect(() => log.save()).not.toThrow()
+    expect(existsSync(filePath)).toBe(true)
   })
 })

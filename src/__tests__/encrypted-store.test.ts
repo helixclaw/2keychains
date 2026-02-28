@@ -183,6 +183,24 @@ describe('EncryptedSecretStore', () => {
         'Secret with ref "no-such-ref" not found',
       )
     })
+
+    it('getByRef throws for non-existent ref', async () => {
+      const store = await createStore()
+      store.add('existing-ref', 'val')
+
+      expect(() => store.getByRef('no-such-ref')).toThrow('Secret with ref "no-such-ref" not found')
+    })
+  })
+
+  describe('getValue', () => {
+    it('throws for non-existent UUID', async () => {
+      const store = await createStore()
+      store.add('some-ref', 'some-value')
+
+      expect(() => store.getValue('00000000-0000-0000-0000-000000000000')).toThrow(
+        'Secret with UUID 00000000-0000-0000-0000-000000000000 not found',
+      )
+    })
   })
 
   describe('resolveRef', () => {

@@ -3,10 +3,11 @@ import { DiscordChannel } from '../channels/discord.js'
 import type { AccessRequest } from '../core/types.js'
 
 const TEST_CONFIG = {
-  webhookUrl: 'https://discord.com/api/webhooks/123/abc',
   botToken: 'test-bot-token',
   channelId: '999888777',
 }
+
+const BOT_USER_ID = 'bot-user-123'
 
 const TEST_REQUEST: AccessRequest = {
   uuids: ['req-001'],
@@ -35,25 +36,32 @@ describe('DiscordChannel', () => {
   })
 
   describe('sendApprovalRequest', () => {
-    it('should POST embed to webhook URL with ?wait=true and return message ID', async () => {
+    it('should POST embed to Bot API and add reactions, returning message ID', async () => {
+      // Mock the POST to create message
       fetchMock.mockResolvedValueOnce({
         ok: true,
         json: async () => ({ id: '123456' }),
       })
+      // Mock the PUT for approve emoji reaction
+      fetchMock.mockResolvedValueOnce({ ok: true })
+      // Mock the PUT for deny emoji reaction
+      fetchMock.mockResolvedValueOnce({ ok: true })
 
       const messageId = await channel.sendApprovalRequest(TEST_REQUEST)
 
       expect(messageId).toBe('123456')
-      expect(fetchMock).toHaveBeenCalledOnce()
+      expect(fetchMock).toHaveBeenCalledTimes(3)
 
-      const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit]
-      expect(url).toBe(`${TEST_CONFIG.webhookUrl}?wait=true`)
-      expect(options.method).toBe('POST')
-      expect(options.headers).toEqual({
+      // Check the message POST
+      const [postUrl, postOptions] = fetchMock.mock.calls[0] as [string, RequestInit]
+      expect(postUrl).toBe(`https://discord.com/api/v10/channels/${TEST_CONFIG.channelId}/messages`)
+      expect(postOptions.method).toBe('POST')
+      expect(postOptions.headers).toEqual({
         'Content-Type': 'application/json',
+        Authorization: `Bot ${TEST_CONFIG.botToken}`,
       })
 
-      const body = JSON.parse(options.body as string)
+      const body = JSON.parse(postOptions.body as string)
       expect(body.embeds).toHaveLength(1)
       expect(body.embeds[0].title).toBe('Access Request')
       expect(body.embeds[0].color).toBe(0xffa500)
@@ -74,9 +82,44 @@ describe('DiscordChannel', () => {
           expect.objectContaining({ name: 'Duration', value: '1h' }),
         ]),
       )
+
+      // Check the reaction PUTs
+      const [approveUrl] = fetchMock.mock.calls[1] as [string, RequestInit]
+      expect(approveUrl).toBe(
+        `https://discord.com/api/v10/channels/${TEST_CONFIG.channelId}/messages/123456/reactions/%E2%9C%85/@me`,
+      )
+
+      const [denyUrl] = fetchMock.mock.calls[2] as [string, RequestInit]
+      expect(denyUrl).toBe(
+        `https://discord.com/api/v10/channels/${TEST_CONFIG.channelId}/messages/123456/reactions/%E2%9D%8C/@me`,
+      )
     })
 
-    it('should throw on non-ok response from webhook', async () => {
+    it('should include Bound Command field when commandHash is present', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: '789012' }),
+      })
+      fetchMock.mockResolvedValueOnce({ ok: true })
+      fetchMock.mockResolvedValueOnce({ ok: true })
+
+      const requestWithHash: AccessRequest = {
+        ...TEST_REQUEST,
+        command: 'echo hello',
+        commandHash: 'abc123deadbeef',
+      }
+
+      await channel.sendApprovalRequest(requestWithHash)
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+      const fields = body.embeds[0].fields
+      const boundCommandField = fields.find((f: { name: string }) => f.name === 'Bound Command')
+      expect(boundCommandField).toBeDefined()
+      expect(boundCommandField.value).toContain('`echo hello`')
+      expect(boundCommandField.value).toContain('abc123deadbeef')
+    })
+
+    it('should throw on non-ok response from Bot API', async () => {
       fetchMock.mockResolvedValueOnce({
         ok: false,
         status: 400,
@@ -84,7 +127,7 @@ describe('DiscordChannel', () => {
       })
 
       await expect(channel.sendApprovalRequest(TEST_REQUEST)).rejects.toThrow(
-        'Discord webhook failed: 400 Bad Request',
+        'Discord API failed: 400 Bad Request',
       )
     })
 
@@ -93,6 +136,8 @@ describe('DiscordChannel', () => {
         ok: true,
         json: async () => ({ id: '123456' }),
       })
+      fetchMock.mockResolvedValueOnce({ ok: true })
+      fetchMock.mockResolvedValueOnce({ ok: true })
 
       await channel.sendApprovalRequest(createRequestWithDuration(300000)) // 5 minutes
 
@@ -108,6 +153,8 @@ describe('DiscordChannel', () => {
         ok: true,
         json: async () => ({ id: '123456' }),
       })
+      fetchMock.mockResolvedValueOnce({ ok: true })
+      fetchMock.mockResolvedValueOnce({ ok: true })
 
       await channel.sendApprovalRequest(createRequestWithDuration(45000)) // 45 seconds
 
@@ -123,6 +170,8 @@ describe('DiscordChannel', () => {
         ok: true,
         json: async () => ({ id: '123456' }),
       })
+      fetchMock.mockResolvedValueOnce({ ok: true })
+      fetchMock.mockResolvedValueOnce({ ok: true })
 
       await channel.sendApprovalRequest(createRequestWithDuration(5700000)) // 1h 35m
 
@@ -143,11 +192,19 @@ describe('DiscordChannel', () => {
       vi.useRealTimers()
     })
 
-    it('should return "approved" when approve emoji reaction is found', async () => {
-      // First call: check approve emoji -> found
+    it('should return "approved" when approve emoji reaction is found from non-bot user', async () => {
+      // First call: check approve emoji -> found with bot and human user
       fetchMock.mockResolvedValueOnce({
         ok: true,
-        json: async () => [{ id: 'user1', username: 'bob' }],
+        json: async () => [
+          { id: BOT_USER_ID, username: 'bot' },
+          { id: 'user1', username: 'bob' },
+        ],
+      })
+      // Second call: get bot user ID
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: BOT_USER_ID }),
       })
 
       const promise = channel.waitForResponse('msg-1', 10000)
@@ -156,16 +213,56 @@ describe('DiscordChannel', () => {
       expect(result).toBe('approved')
     })
 
-    it('should return "denied" when deny emoji reaction is found', async () => {
-      // First call: check approve emoji -> empty
+    it('should ignore bot-only reactions and continue polling', async () => {
+      // First poll: approve emoji has only bot reaction
       fetchMock.mockResolvedValueOnce({
         ok: true,
-        json: async () => [],
+        json: async () => [{ id: BOT_USER_ID, username: 'bot' }],
       })
-      // Second call: check deny emoji -> found
+      // Get bot user ID (will be cached after first call)
       fetchMock.mockResolvedValueOnce({
         ok: true,
-        json: async () => [{ id: 'user2', username: 'carol' }],
+        json: async () => ({ id: BOT_USER_ID }),
+      })
+      // First poll: deny emoji has only bot reaction
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: BOT_USER_ID, username: 'bot' }],
+      })
+
+      // After sleep, second poll: approve found with human user
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: BOT_USER_ID, username: 'bot' },
+          { id: 'user1', username: 'bob' },
+        ],
+      })
+
+      const promise = channel.waitForResponse('msg-1', 10000)
+
+      // Advance past the poll interval to trigger second iteration
+      await vi.advanceTimersByTimeAsync(2500)
+
+      const result = await promise
+      expect(result).toBe('approved')
+    })
+
+    it('should return "denied" when deny emoji reaction is found from non-bot user', async () => {
+      // First call: check approve emoji -> only bot
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: BOT_USER_ID }],
+      })
+      // Get bot user ID
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: BOT_USER_ID }),
+      })
+      // Second call: check deny emoji -> found with human
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: BOT_USER_ID }, { id: 'user2', username: 'carol' }],
       })
 
       const result = await channel.waitForResponse('msg-1', 10000)
@@ -174,10 +271,13 @@ describe('DiscordChannel', () => {
     })
 
     it('should return "timeout" when no reactions within timeout window', async () => {
-      // Mock all fetch calls to return empty reactions
-      fetchMock.mockResolvedValue({
-        ok: true,
-        json: async () => [],
+      // Mock bot user ID call
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.includes('/users/@me')) {
+          return { ok: true, json: async () => ({ id: BOT_USER_ID }) }
+        }
+        // Return only bot reactions for reaction checks
+        return { ok: true, json: async () => [{ id: BOT_USER_ID }] }
       })
 
       // Use a short timeout and advance timers in a loop to drain all pending work
@@ -206,10 +306,15 @@ describe('DiscordChannel', () => {
         statusText: 'Not Found',
       })
 
-      // After sleep, second poll: approve found
+      // After sleep, second poll: approve found with human user
       fetchMock.mockResolvedValueOnce({
         ok: true,
         json: async () => [{ id: 'user1' }],
+      })
+      // Get bot user ID
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: BOT_USER_ID }),
       })
 
       const promise = channel.waitForResponse('msg-1', 10000)
@@ -232,18 +337,59 @@ describe('DiscordChannel', () => {
         'Discord reactions API failed: 401 Unauthorized',
       )
     })
+
+    it('should only accept reactions from authorized users when authorizedUserIds is set', async () => {
+      const channelWithAuth = new DiscordChannel({
+        ...TEST_CONFIG,
+        authorizedUserIds: ['authorized-user-1', 'authorized-user-2'],
+      })
+
+      // First poll: approve emoji has unauthorized user
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: BOT_USER_ID }, { id: 'unauthorized-user', username: 'stranger' }],
+      })
+      // Get bot user ID
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: BOT_USER_ID }),
+      })
+      // First poll: deny emoji has no reactions
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: BOT_USER_ID }],
+      })
+
+      // After sleep, second poll: approve has authorized user
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ id: BOT_USER_ID }, { id: 'authorized-user-1', username: 'admin' }],
+      })
+
+      const promise = channelWithAuth.waitForResponse('msg-1', 10000)
+
+      // Advance past the poll interval
+      await vi.advanceTimersByTimeAsync(2500)
+
+      const result = await promise
+      expect(result).toBe('approved')
+    })
   })
 
   describe('sendNotification', () => {
-    it('should POST text content to webhook URL', async () => {
+    it('should POST text content to Bot API', async () => {
       fetchMock.mockResolvedValueOnce({ ok: true })
 
       await channel.sendNotification('Request approved by bob')
 
       expect(fetchMock).toHaveBeenCalledOnce()
       const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit]
-      expect(url).toBe(TEST_CONFIG.webhookUrl)
+      expect(url).toBe(`https://discord.com/api/v10/channels/${TEST_CONFIG.channelId}/messages`)
       expect(options.method).toBe('POST')
+      expect(options.headers).toEqual({
+        'Content-Type': 'application/json',
+        Authorization: `Bot ${TEST_CONFIG.botToken}`,
+      })
 
       const body = JSON.parse(options.body as string)
       expect(body.content).toBe('Request approved by bob')
@@ -257,7 +403,7 @@ describe('DiscordChannel', () => {
       })
 
       await expect(channel.sendNotification('test message')).rejects.toThrow(
-        'Discord webhook failed: 500 Internal Server Error',
+        'Discord API failed: 500 Internal Server Error',
       )
     })
   })

@@ -10,51 +10,51 @@ import type { GrantManager, AccessGrant } from '../core/grant.js'
 import type { WorkflowEngine } from '../core/workflow.js'
 import type { SecretInjector } from '../core/injector.js'
 import type { RequestLog } from '../core/request.js'
+import type { SessionLock } from '../core/session-lock.js'
 
 describe('resolveService', () => {
-  it('returns LocalService for standalone mode', () => {
+  it('returns LocalService for standalone mode', async () => {
     const config = defaultConfig()
-    const service = resolveService(config)
+    const service = await resolveService(config)
     expect(service).toBeInstanceOf(LocalService)
   })
 
-  it('returns RemoteService for client mode', () => {
+  it('returns RemoteService for client mode', async () => {
     const config = {
       ...defaultConfig(),
       mode: 'client' as const,
       server: { host: '127.0.0.1', port: 2274, authToken: 'test-token' },
     }
-    const service = resolveService(config)
+    const service = await resolveService(config)
     expect(service).toBeInstanceOf(RemoteService)
   })
 
-  it('throws when defaultRequireApproval is true and discord not configured', () => {
+  it('throws when defaultRequireApproval is true and discord not configured', async () => {
     const config = { ...defaultConfig(), defaultRequireApproval: true }
-    expect(() => resolveService(config)).toThrow(
+    await expect(resolveService(config)).rejects.toThrow(
       'Discord must be configured when defaultRequireApproval is true',
     )
   })
 
-  it('creates a noop channel when discord is not configured and approval not required', () => {
+  it('creates a noop channel when discord is not configured and approval not required', async () => {
     const config = {
       ...defaultConfig(),
       defaultRequireApproval: false,
       discord: undefined,
     }
-    const service = resolveService(config)
+    const service = await resolveService(config)
     expect(service).toBeInstanceOf(LocalService)
   })
 
-  it('creates LocalService with discord channel when discord is configured', () => {
+  it('creates LocalService with discord channel when discord is configured', async () => {
     const config = {
       ...defaultConfig(),
       discord: {
-        webhookUrl: 'https://discord.com/api/webhooks/123/abc',
         botToken: 'bot-token',
         channelId: '999888777',
       },
     }
-    const service = resolveService(config)
+    const service = await resolveService(config)
     expect(service).toBeInstanceOf(LocalService)
   })
 })
@@ -100,7 +100,7 @@ function makeService() {
   const grantManager = {
     getGrantByRequestId: vi.fn().mockReturnValue(makeGrantMock()),
     validateGrant: vi.fn().mockReturnValue(true),
-    createGrant: vi.fn().mockReturnValue(makeGrantMock()),
+    createGrant: vi.fn().mockReturnValue({ grant: makeGrantMock(), jws: undefined }),
   } as unknown as GrantManager
 
   const workflowEngine = {
@@ -113,23 +113,41 @@ function makeService() {
 
   const requestLog = {
     add: vi.fn(),
+    save: vi.fn(),
+    getById: vi.fn().mockReturnValue(undefined),
   } as unknown as RequestLog
 
+  const sessionLock = {
+    save: vi.fn(),
+    load: vi.fn().mockReturnValue(null),
+    clear: vi.fn(),
+    touch: vi.fn(),
+    exists: vi.fn().mockReturnValue(false),
+  } as unknown as SessionLock
+
   const startTime = Date.now() - 1000
+
+  const publicKey = {
+    export: vi.fn().mockReturnValue('-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----'),
+  } as unknown as import('node:crypto').KeyObject
 
   const service = new LocalService({
     store,
     unlockSession,
+    sessionLock,
     grantManager,
     workflowEngine,
     injector,
     requestLog,
     startTime,
+    bindCommand: false,
+    publicKey,
   })
   return {
     service,
     store,
     unlockSession,
+    sessionLock,
     grantManager,
     workflowEngine,
     injector,
@@ -218,46 +236,124 @@ describe('LocalService', () => {
   })
 
   describe('requests.create()', () => {
-    it('creates request, calls workflow, creates grant when approved', async () => {
-      const { service, workflowEngine, grantManager, requestLog } = makeService()
+    it('returns request with pending status immediately', async () => {
+      const { service, requestLog } = makeService()
+      const result = await service.requests.create(['u1'], 'need access', 'task-1', 300)
+      expect(result.status).toBe('pending')
+      expect(requestLog.add).toHaveBeenCalledWith(result)
+      expect(requestLog.save).toHaveBeenCalled()
+    })
+
+    it('runs workflow in background and creates grant when approved', async () => {
+      const { service, workflowEngine, grantManager } = makeService()
       ;(workflowEngine.processRequest as MockInstance).mockImplementation(async (req) => {
         req.status = 'approved'
         return 'approved'
       })
-      const result = await service.requests.create(['u1'], 'need access', 'task-1', 300)
-      expect(result.status).toBe('approved')
-      expect(requestLog.add).toHaveBeenCalledWith(result)
-      expect(grantManager.createGrant).toHaveBeenCalledWith(result)
+      await service.requests.create(['u1'], 'need access', 'task-1', 300)
+      await vi.waitFor(() => {
+        expect(grantManager.createGrant).toHaveBeenCalled()
+      })
     })
 
-    it('returns request with denied status when workflow denies', async () => {
-      const { service, workflowEngine, grantManager, requestLog } = makeService()
+    it('computes commandHash when bindCommand is true and command is provided', async () => {
+      const {
+        store,
+        unlockSession,
+        sessionLock,
+        grantManager,
+        workflowEngine,
+        injector,
+        requestLog,
+        startTime,
+      } = makeService()
+      const serviceWithBind = new LocalService({
+        store,
+        unlockSession,
+        sessionLock,
+        grantManager,
+        workflowEngine,
+        injector,
+        requestLog,
+        startTime,
+        bindCommand: true,
+        publicKey: {
+          export: vi.fn().mockReturnValue(''),
+        } as unknown as import('node:crypto').KeyObject,
+      })
+      ;(workflowEngine.processRequest as MockInstance).mockImplementation(async (req) => {
+        req.status = 'approved'
+        return 'approved'
+      })
+      const result = await serviceWithBind.requests.create(
+        ['u1'],
+        'need access',
+        'task-1',
+        300,
+        'echo hello',
+      )
+      expect(result.commandHash).toBeDefined()
+      expect(typeof result.commandHash).toBe('string')
+      expect(result.command).toBe('echo hello')
+    })
+
+    it('does not create grant when workflow denies', async () => {
+      const { service, workflowEngine, grantManager } = makeService()
       ;(workflowEngine.processRequest as MockInstance).mockImplementation(async (req) => {
         req.status = 'denied'
         return 'denied'
       })
-      const result = await service.requests.create(['u1'], 'need access', 'task-1', 300)
-      expect(result.status).toBe('denied')
-      expect(requestLog.add).toHaveBeenCalledWith(result)
+      await service.requests.create(['u1'], 'need access', 'task-1', 300)
+      await vi.waitFor(() => {
+        // Wait for background task to complete
+        expect(workflowEngine.processRequest).toHaveBeenCalled()
+      })
       expect(grantManager.createGrant).not.toHaveBeenCalled()
+    })
+
+    it('sets status to denied on unexpected workflow error', async () => {
+      const { service, workflowEngine, requestLog } = makeService()
+      ;(workflowEngine.processRequest as MockInstance).mockRejectedValue(new Error('network error'))
+      const result = await service.requests.create(['u1'], 'need access', 'task-1', 300)
+      await vi.waitFor(() => {
+        expect(requestLog.save).toHaveBeenCalledTimes(2) // initial + error handler
+      })
+      expect(result.status).toBe('denied')
     })
   })
 
-  describe('grants.validate()', () => {
-    it('returns true for valid grant by requestId', async () => {
-      const { service, grantManager } = makeService()
-      ;(grantManager.getGrantByRequestId as MockInstance).mockReturnValue(makeGrantMock())
-      ;(grantManager.validateGrant as MockInstance).mockReturnValue(true)
-      const result = await service.grants.validate('request-id')
-      expect(result).toBe(true)
+  describe('grants.getStatus()', () => {
+    it('returns approved status with grant and jws when grant exists', async () => {
+      const { service, grantManager, requestLog } = makeService()
+      const pendingReq = { status: 'approved' as const, id: 'request-id' }
+      ;(requestLog.getById as MockInstance).mockReturnValue(pendingReq)
+      const grantWithJws = { ...makeGrantMock(), jws: 'test.jws.token' }
+      ;(grantManager.getGrantByRequestId as MockInstance).mockReturnValue(grantWithJws)
+
+      const result = await service.grants.getStatus('request-id')
+      expect(result.status).toBe('approved')
+      expect(result.grant).toBeDefined()
+      expect(result.jws).toBe('test.jws.token')
     })
 
-    it('returns false when no grant found for requestId', async () => {
-      const { service, grantManager } = makeService()
+    it('returns pending status when request exists but no grant yet', async () => {
+      const { service, grantManager, requestLog } = makeService()
+      ;(requestLog.getById as MockInstance).mockReturnValue({ status: 'pending', id: 'request-id' })
       ;(grantManager.getGrantByRequestId as MockInstance).mockReturnValue(undefined)
-      const result = await service.grants.validate('unknown-request')
-      expect(result).toBe(false)
-      expect(grantManager.validateGrant).not.toHaveBeenCalled()
+
+      const result = await service.grants.getStatus('request-id')
+      expect(result.status).toBe('pending')
+      expect(result.grant).toBeUndefined()
+      expect(result.jws).toBeUndefined()
+    })
+
+    it('throws when requestId not found', async () => {
+      const { service, requestLog } = makeService()
+      ;(requestLog.getById as MockInstance).mockReturnValue(undefined)
+
+      await expect(service.grants.getStatus('unknown')).rejects.toThrow(
+        'Request not found: unknown',
+      )
     })
   })
 
@@ -289,11 +385,42 @@ describe('LocalService', () => {
         'No grant found for request: missing-request',
       )
     })
+
+    it('passes when grant has no commandHash (pre-binding grants)', async () => {
+      const { service, grantManager, injector } = makeService()
+      const grant = makeGrantMock({ commandHash: undefined })
+      ;(grantManager.getGrantByRequestId as MockInstance).mockReturnValue(grant)
+      const result = await service.inject('request-id', 'echo hello')
+      expect(injector.inject).toHaveBeenCalled()
+      expect(result).toEqual({ exitCode: 0, stdout: 'ok', stderr: '' })
+    })
+
+    it('passes when command hash matches grant commandHash', async () => {
+      const { service, grantManager, injector } = makeService()
+      // Pre-compute the hash of normalizeCommand('echo hello') = 'echo hello'
+      // SHA-256 of 'echo hello'
+      const { hashCommand, normalizeCommand } = await import('../core/command-hash.js')
+      const expectedHash = hashCommand(normalizeCommand('echo hello'))
+      const grant = makeGrantMock({ commandHash: expectedHash })
+      ;(grantManager.getGrantByRequestId as MockInstance).mockReturnValue(grant)
+      const result = await service.inject('request-id', 'echo hello')
+      expect(injector.inject).toHaveBeenCalled()
+      expect(result).toEqual({ exitCode: 0, stdout: 'ok', stderr: '' })
+    })
+
+    it('throws when command hash does not match grant commandHash', async () => {
+      const { service, grantManager } = makeService()
+      const grant = makeGrantMock({ commandHash: 'wrong-hash-that-does-not-match' })
+      ;(grantManager.getGrantByRequestId as MockInstance).mockReturnValue(grant)
+      await expect(service.inject('request-id', 'echo hello')).rejects.toThrow(
+        'Command does not match the approved command hash',
+      )
+    })
   })
 
   describe('unlock()', () => {
     it('unlocks the store and passes DEK to session', async () => {
-      const { service, store, unlockSession } = makeService()
+      const { service, store, unlockSession, sessionLock } = makeService()
       ;(store.unlock as MockInstance).mockResolvedValue(undefined)
       ;(store.getDek as MockInstance).mockReturnValue(Buffer.alloc(32, 0xaa))
 
@@ -301,6 +428,7 @@ describe('LocalService', () => {
 
       expect(store.unlock).toHaveBeenCalledWith('test-password')
       expect(unlockSession.unlock).toHaveBeenCalledWith(Buffer.alloc(32, 0xaa))
+      expect(sessionLock.save).toHaveBeenCalledWith(Buffer.alloc(32, 0xaa))
     })
 
     it('throws when DEK is null after unlock', async () => {
@@ -313,10 +441,25 @@ describe('LocalService', () => {
   })
 
   describe('lock()', () => {
-    it('locks the session (store locks via event)', () => {
-      const { service, unlockSession } = makeService()
+    it('locks the session and clears sessionLock', () => {
+      const { service, unlockSession, sessionLock } = makeService()
       service.lock()
       expect(unlockSession.lock).toHaveBeenCalled()
+      expect(sessionLock.clear).toHaveBeenCalled()
+    })
+  })
+
+  describe('isUnlocked()', () => {
+    it('returns true when session is unlocked', () => {
+      const { service, unlockSession } = makeService()
+      ;(unlockSession.isUnlocked as MockInstance).mockReturnValue(true)
+      expect(service.isUnlocked()).toBe(true)
+    })
+
+    it('returns false when session is locked', () => {
+      const { service, unlockSession } = makeService()
+      ;(unlockSession.isUnlocked as MockInstance).mockReturnValue(false)
+      expect(service.isUnlocked()).toBe(false)
     })
   })
 
@@ -326,6 +469,46 @@ describe('LocalService', () => {
       const onCall = (unlockSession.on as MockInstance).mock.calls[0]
       service.destroy()
       expect(unlockSession.off).toHaveBeenCalledWith('locked', onCall[1])
+    })
+  })
+
+  describe('onLocked callback', () => {
+    it('calls store.lock() and sessionLock.clear() when unlockSession emits locked', () => {
+      const { store, unlockSession, sessionLock } = makeService()
+      const onCall = (unlockSession.on as MockInstance).mock.calls[0]
+      expect(onCall[0]).toBe('locked')
+      // Invoke the registered handler
+      onCall[1]()
+      expect(store.lock).toHaveBeenCalledOnce()
+      expect(sessionLock.clear).toHaveBeenCalledOnce()
+    })
+  })
+
+  describe('createGrant error path', () => {
+    it('sets status to error when createGrant fails after workflow approval', async () => {
+      const { service, workflowEngine, grantManager } = makeService()
+      ;(workflowEngine.processRequest as MockInstance).mockImplementation(async (req) => {
+        req.status = 'approved'
+        return 'approved'
+      })
+      ;(grantManager.createGrant as MockInstance).mockImplementation(() => {
+        throw new Error('signing key unavailable')
+      })
+
+      const result = await service.requests.create(['u1'], 'need access', 'task-1', 300)
+      await vi.waitFor(() => {
+        expect(grantManager.createGrant).toHaveBeenCalled()
+      })
+      // The result's status may have been updated after the workflow ran
+      expect(result.status).toBe('error')
+    })
+  })
+
+  describe('keys', () => {
+    it('getPublicKey() returns exported PEM key', async () => {
+      const { service } = makeService()
+      const result = await service.keys.getPublicKey()
+      expect(result).toBe('-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----')
     })
   })
 })

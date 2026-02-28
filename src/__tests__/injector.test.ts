@@ -117,6 +117,80 @@ describe('SecretInjector', () => {
       expect(secretStore.getValue).not.toHaveBeenCalled()
     })
 
+    it('throws if envVarName provided but grant has no secret UUIDs', async () => {
+      const grantManager = createMockGrantManager({
+        getGrant: vi.fn().mockReturnValue({
+          id: 'grant-1',
+          requestId: 'req-1',
+          secretUuids: [],
+          grantedAt: '2026-01-15T10:00:00.000Z',
+          expiresAt: '2026-01-15T10:05:00.000Z',
+          used: false,
+          revokedAt: null,
+        }),
+      })
+      const secretStore = createMockSecretStore()
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      await expect(
+        injector.inject('grant-1', ['echo', 'hello'], { envVarName: 'SECRET_VAR' }),
+      ).rejects.toThrow('Grant has no secret UUIDs')
+
+      expect(mockedSpawn).not.toHaveBeenCalled()
+    })
+
+    it('throws if envVarName provided but secret value is null', async () => {
+      const grantManager = createMockGrantManager()
+      const secretStore = createMockSecretStore({
+        getValue: vi.fn().mockReturnValue(null),
+      })
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      await expect(
+        injector.inject('grant-1', ['echo', 'hello'], { envVarName: 'SECRET_VAR' }),
+      ).rejects.toThrow('Secret value not found for UUID: secret-uuid-1')
+
+      expect(mockedSpawn).not.toHaveBeenCalled()
+    })
+
+    it('handles getValue throwing during secret collection for redaction', async () => {
+      const grantManager = createMockGrantManager({
+        getGrant: vi.fn().mockReturnValue({
+          id: 'grant-1',
+          requestId: 'req-1',
+          secretUuids: ['uuid-exists', 'uuid-throws'],
+          grantedAt: '2026-01-15T10:00:00.000Z',
+          expiresAt: '2026-01-15T10:05:00.000Z',
+          used: false,
+          revokedAt: null,
+        }),
+      })
+      const secretStore = createMockSecretStore({
+        getValue: vi.fn().mockImplementation((uuid: string) => {
+          if (uuid === 'uuid-exists') return 'valid-secret'
+          throw new Error('Secret not found')
+        }),
+      })
+      const injector = new SecretInjector(grantManager, secretStore)
+
+      const mockChild = createMockChild()
+      mockedSpawn.mockReturnValue(mockChild as never)
+
+      // No envVarName, so no explicit injection - just scan and collect for redaction
+      const resultPromise = injector.inject('grant-1', ['echo', 'hello'])
+
+      mockChild.stdout.emit('data', Buffer.from('output'))
+      mockChild.emit('close', 0)
+
+      const result = await resultPromise
+
+      // Should succeed despite one secret throwing
+      expect(result.exitCode).toBe(0)
+      // getValue was called for both UUIDs
+      expect(secretStore.getValue).toHaveBeenCalledWith('uuid-exists')
+      expect(secretStore.getValue).toHaveBeenCalledWith('uuid-throws')
+    })
+
     it('rejects immediately if grant is invalid', async () => {
       const grantManager = createMockGrantManager({
         validateGrant: vi.fn().mockReturnValue(false),

@@ -20,8 +20,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
-      - run: npx tsc --noEmit
-      - run: npm run test:coverage
+      - run: npm run compile
+      - run: npm run test
 
       - name: Update coverage badge
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -40,9 +40,9 @@ jobs:
             }
             const color = coverage >= 80 ? 'brightgreen' : coverage >= 60 ? 'yellow' : 'red';
             let readme = fs.readFileSync('README.md', 'utf8');
-            readme = readme.replace(/coverage-[0-9]+%25-[a-z]+/g, \\\`coverage-\\\${coverage}%25-\\\${color}\\\`);
+            readme = readme.replace(/coverage-[0-9]+%25-[a-z]+/g, \`coverage-\${coverage}%25-\${color}\`);
             fs.writeFileSync('README.md', readme);
-            console.log(\\\`Coverage: \\\${coverage}% (\\\${color})\\\`);
+            console.log(\`Coverage: \${coverage}% (\${color})\`);
           } catch (err) {
             console.error('Failed to update coverage badge:', err.message);
             process.exit(1);

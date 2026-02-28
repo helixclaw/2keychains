@@ -19,6 +19,7 @@ const mockSaveConfig = vi.fn()
 vi.mock('../core/config.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...(args as [])),
   saveConfig: (...args: unknown[]) => mockSaveConfig(...(args as [])),
+  CONFIG_DIR: '/tmp/.2kc',
 }))
 
 const mockInitialize = vi.fn()
@@ -135,6 +136,21 @@ describe('store init command', () => {
     errorSpy.mockRestore()
     stderrSpy.mockRestore()
   })
+
+  it('sets exitCode=1 when store path does not end with .json', async () => {
+    const config = createTestConfig({ store: { path: '/tmp/.2kc/secrets.txt' } })
+    mockLoadConfig.mockReturnValue(config)
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { storeCommand } = await import('../cli/store.js')
+    await storeCommand.parseAsync(['init'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('store.path must end in .json'))
+    expect(process.exitCode).toBe(1)
+
+    errorSpy.mockRestore()
+  })
 })
 
 describe('store migrate command', () => {
@@ -174,6 +190,35 @@ describe('store migrate command', () => {
 
     expect(mockSaveConfig).toHaveBeenCalled()
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Migrated'))
+    expect(process.exitCode).toBeUndefined()
+
+    logSpy.mockRestore()
+    stderrSpy.mockRestore()
+  })
+
+  it('deletes existing .bak file before renaming', async () => {
+    const config = createTestConfig()
+    mockLoadConfig.mockReturnValue(config)
+    mockPasswordPrompt('migrate-pw')
+    // existsSync: plaintextPath (true), encryptedPath (false), .bak (true - exists!)
+    mockExistsSync
+      .mockReturnValueOnce(true) // plaintextPath exists
+      .mockReturnValueOnce(false) // encryptedPath doesn't exist
+      .mockReturnValueOnce(true) // .bak already exists
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({ secrets: [{ ref: 'test', value: 'val', tags: [] }] }),
+    )
+    mockInitialize.mockResolvedValue(undefined)
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+
+    const { storeCommand } = await import('../cli/store.js')
+    await storeCommand.parseAsync(['migrate'], { from: 'user' })
+
+    // Should have called unlinkSync for the .bak file
+    expect(mockUnlinkSync).toHaveBeenCalledWith('/tmp/.2kc/secrets.json.bak')
+    expect(mockRenameSync).toHaveBeenCalled()
     expect(process.exitCode).toBeUndefined()
 
     logSpy.mockRestore()

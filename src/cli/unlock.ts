@@ -1,45 +1,13 @@
 import { Command } from 'commander'
-import { createInterface } from 'node:readline'
-import { Writable } from 'node:stream'
-import { readFileSync, existsSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
 
-import { loadConfig } from '../core/config.js'
-import { deriveKek } from '../core/kdf.js'
-import { unwrapDek } from '../core/crypto.js'
-import { UnlockSession } from '../core/unlock-session.js'
-import type { EncryptedStoreFile } from '../core/encrypted-store.js'
+import { loadConfig, CONFIG_DIR } from '../core/config.js'
+import { resolveService, LocalService } from '../core/service.js'
+import { SessionLock } from '../core/session-lock.js'
+import { promptPassword } from './password-prompt.js'
 
-const ENCRYPTED_STORE_PATH = join(homedir(), '.2kc', 'secrets.enc.json')
-
-function promptPassword(): Promise<string> {
-  return new Promise((resolve) => {
-    let muted = false
-    const mutableOutput = new Writable({
-      write(_chunk, _encoding, callback) {
-        if (!muted) process.stderr.write(_chunk)
-        callback()
-      },
-    })
-
-    const rl = createInterface({
-      input: process.stdin,
-      output: mutableOutput,
-      terminal: true,
-    })
-
-    process.stderr.write('Password: ')
-    muted = true
-
-    rl.question('', (answer) => {
-      muted = false
-      process.stderr.write('\n')
-      rl.close()
-      resolve(answer)
-    })
-  })
-}
+const ENCRYPTED_STORE_PATH = join(CONFIG_DIR, 'secrets.enc.json')
 
 function formatTtl(ms: number): string {
   const seconds = Math.round(ms / 1000)
@@ -57,6 +25,14 @@ function formatTtl(ms: number): string {
 const unlockCommand = new Command('unlock').description('Unlock the encrypted secret store')
 
 unlockCommand.action(async () => {
+  const config = loadConfig()
+
+  if (config.mode === 'client') {
+    console.error('Error: Unlock persistence is not supported in client mode.')
+    process.exitCode = 1
+    return
+  }
+
   if (!existsSync(ENCRYPTED_STORE_PATH)) {
     console.error('Error: Encrypted store not found. Run store initialization first.')
     process.exitCode = 1
@@ -64,43 +40,23 @@ unlockCommand.action(async () => {
   }
 
   const password = await promptPassword()
+  const service = (await resolveService(config)) as LocalService
 
-  let store: EncryptedStoreFile
   try {
-    const raw = JSON.parse(readFileSync(ENCRYPTED_STORE_PATH, 'utf-8')) as Record<string, unknown>
-    if (raw.version !== 1 || !raw.kdf || !raw.wrappedDek) {
-      console.error('Error: Malformed encrypted store file.')
-      process.exitCode = 1
-      return
-    }
-    store = raw as unknown as EncryptedStoreFile
-  } catch {
-    console.error('Error: Failed to read encrypted store file.')
-    process.exitCode = 1
-    return
-  }
-
-  let dek: Buffer
-  try {
-    const kek = await deriveKek(password, Buffer.from(store.kdf.salt, 'base64'), store.kdf.params)
-    dek = unwrapDek(kek, store.wrappedDek.ciphertext, store.wrappedDek.nonce, store.wrappedDek.tag)
+    await service.unlock(password)
+    console.log(`Store unlocked. Session expires in ${formatTtl(config.unlock.ttlMs)}.`)
   } catch {
     console.error('Incorrect password.')
     process.exitCode = 1
-    return
   }
-
-  const config = loadConfig()
-  const session = new UnlockSession(config.unlock)
-  session.unlock(dek)
-  dek.fill(0)
-
-  console.log(`Store unlocked. Session expires in ${formatTtl(config.unlock.ttlMs)}.`)
 })
 
 const lockCommand = new Command('lock').description('Lock the encrypted secret store')
 
-lockCommand.action(() => {
+lockCommand.action(async () => {
+  const config = loadConfig()
+  const service = (await resolveService(config)) as LocalService
+  service.lock()
   console.log('Store locked.')
 })
 
@@ -113,7 +69,15 @@ statusCommand.action(() => {
     console.log('Encrypted store not found. Run store initialization first.')
     return
   }
-  console.log('Store is locked.')
+
+  const config = loadConfig()
+  const sessionLock = new SessionLock(config.unlock)
+
+  if (sessionLock.exists()) {
+    console.log('Store is unlocked.')
+  } else {
+    console.log('Store is locked.')
+  }
 })
 
 export { unlockCommand, lockCommand, statusCommand }

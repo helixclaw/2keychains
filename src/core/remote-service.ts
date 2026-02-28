@@ -1,13 +1,24 @@
+import { createHash } from 'node:crypto'
 import type { ServerConfig } from './config.js'
 import type { Service, SecretSummary } from './service.js'
 import type { SecretMetadata, ProcessResult } from './types.js'
-import type { AccessRequest } from './request.js'
+import type { AccessRequest, AccessRequestStatus } from './request.js'
+import type { AccessGrant } from './grant.js'
+import type { SecretInjector, GrantSecretCache } from './injector.js'
+import { GrantVerifier } from './grant-verifier.js'
+
+export interface RemoteServiceDeps {
+  injector?: SecretInjector
+}
 
 export class RemoteService implements Service {
   private baseUrl: string
   private authToken: string
+  private sessionToken: string | null = null
+  private grantVerifier: GrantVerifier
+  private deps: RemoteServiceDeps
 
-  constructor(serverConfig: ServerConfig) {
+  constructor(serverConfig: ServerConfig, deps: RemoteServiceDeps = {}) {
     const host = serverConfig.host
     const port = serverConfig.port
 
@@ -16,12 +27,59 @@ export class RemoteService implements Service {
     }
     this.authToken = serverConfig.authToken
     this.baseUrl = `http://${host}:${port}`
+    this.grantVerifier = new GrantVerifier(this.baseUrl, this.authToken)
+    this.deps = deps
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async login(): Promise<void> {
+    const url = `${this.baseUrl}/api/auth/login`
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: this.authToken }),
+        signal: AbortSignal.timeout(30_000),
+      })
+    } catch (err: unknown) {
+      if (err instanceof TypeError) {
+        throw new Error('Server not running. Start with `2kc server start`')
+      }
+      if (err instanceof DOMException || (err instanceof Error && err.name === 'TimeoutError')) {
+        throw new Error('Request timed out after 30s. Is the server responding?')
+      }
+      throw err
+    }
+
+    if (!response.ok) {
+      this.sessionToken = null
+      return
+    }
+
+    const body = (await response.json().catch(() => null)) as {
+      token?: string
+      sessionToken?: string
+    } | null
+    this.sessionToken = body?.token ?? body?.sessionToken ?? null
+  }
+
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    isRetry = false,
+  ): Promise<T> {
+    // Auto-login on first request if no session token
+    if (this.sessionToken === null && !isRetry) {
+      await this.login()
+    }
+
     const url = `${this.baseUrl}${path}`
+    const authValue =
+      this.sessionToken !== null ? `Bearer ${this.sessionToken}` : `Bearer ${this.authToken}`
+
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.authToken}`,
+      Authorization: authValue,
     }
 
     if (body !== undefined) {
@@ -47,6 +105,12 @@ export class RemoteService implements Service {
     }
 
     if (response.status === 401) {
+      if (!isRetry) {
+        // Session expired or rejected — re-login and retry once
+        this.sessionToken = null
+        await this.login()
+        return this.request<T>(method, path, body, true)
+      }
       throw new Error('Authentication failed. Check authToken in config')
     }
 
@@ -75,6 +139,11 @@ export class RemoteService implements Service {
     return this.request<{ status: string; uptime?: number }>('GET', '/health')
   }
 
+  keys: Service['keys'] = {
+    getPublicKey: () =>
+      this.request<{ publicKey: string }>('GET', '/api/keys/public').then((r) => r.publicKey),
+  }
+
   secrets: Service['secrets'] = {
     list: () => this.request<SecretSummary[]>('GET', '/api/secrets'),
     add: (ref: string, value: string, tags?: string[]) =>
@@ -88,18 +157,33 @@ export class RemoteService implements Service {
   }
 
   requests: Service['requests'] = {
-    create: (secretUuids: string[], reason: string, taskRef: string, duration?: number) =>
+    create: (
+      secretUuids: string[],
+      reason: string,
+      taskRef: string,
+      duration?: number,
+      command?: string,
+    ) =>
       this.request<AccessRequest>('POST', '/api/requests', {
         secretUuids,
         reason,
         taskRef,
         duration,
+        command,
       }),
   }
 
   grants: Service['grants'] = {
-    validate: (requestId: string) =>
-      this.request<boolean>('GET', `/api/grants/${encodeURIComponent(requestId)}`),
+    getStatus: (requestId: string) =>
+      this.request<{ status: AccessRequestStatus; grant?: AccessGrant; jws?: string }>(
+        'GET',
+        `/api/grants/${encodeURIComponent(requestId)}`,
+      ),
+    consume: (requestId: string) =>
+      this.request<{
+        grantId: string
+        secrets: Record<string, { uuid: string; ref: string; value: string }>
+      }>('POST', `/api/grants/${encodeURIComponent(requestId)}/consume`),
   }
 
   async inject(
@@ -107,10 +191,28 @@ export class RemoteService implements Service {
     command: string,
     options?: { envVarName?: string },
   ): Promise<ProcessResult> {
-    return this.request<ProcessResult>('POST', '/api/inject', {
-      requestId,
-      command,
-      ...(options?.envVarName != null && { envVarName: options.envVarName }),
-    })
+    // 1. Fetch signed grant JWS from server and verify
+    const { jws: jwsToken } = await this.request<{ jws: string }>(
+      'GET',
+      `/api/grants/${encodeURIComponent(requestId)}/signed`,
+    )
+
+    // 2. Verify JWS signature + expiry, binding to this command's hash
+    const commandHash = createHash('sha256').update(command).digest('hex')
+    await this.grantVerifier.verifyGrant(jwsToken, commandHash)
+
+    // 3. Consume grant and fetch all secrets from server in one atomic request
+    const { secrets } = await this.grants.consume(requestId)
+
+    // 4. Convert to Map for cache
+    const secretCache: GrantSecretCache = new Map(
+      Object.entries(secrets).map(([uuid, data]) => [uuid, data]),
+    )
+
+    // 5. Run injection with pre-fetched secrets (no local store needed)
+    if (!this.deps.injector) {
+      throw new Error('Injector not available')
+    }
+    return this.deps.injector.injectWithCache(['/bin/sh', '-c', command], secretCache, options)
   }
 }
