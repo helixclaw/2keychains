@@ -1,10 +1,12 @@
 import { Command } from 'commander'
+import { join } from 'node:path'
 
 import {
   loadConfig,
   saveConfig,
   defaultConfig,
   CONFIG_PATH,
+  CONFIG_DIR,
   type AppConfig,
 } from '../core/config.js'
 
@@ -17,7 +19,7 @@ config
   .option('--server-host <host>', 'Server host', '127.0.0.1')
   .option('--server-port <port>', 'Server port', '2274')
   .option('--server-auth-token <token>', 'Server auth token')
-  .option('--store-path <path>', 'Secret store path', '~/.2kc/secrets.json')
+  .option('--store-path <path>', 'Secret store path', join(CONFIG_DIR, 'secrets.json'))
   .option('--bot-token <token>', 'Discord bot token')
   .option('--channel-id <id>', 'Discord channel ID')
   .option('--authorized-user-ids <ids>', 'Comma-separated Discord user IDs authorized to approve')

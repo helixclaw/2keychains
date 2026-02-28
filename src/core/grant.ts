@@ -2,7 +2,7 @@ import { randomUUID, sign } from 'node:crypto'
 import type { KeyObject } from 'node:crypto'
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { homedir } from 'node:os'
+import { CONFIG_DIR } from './config.js'
 import type { AccessRequest } from './request.js'
 
 export interface AccessGrant {
@@ -17,7 +17,7 @@ export interface AccessGrant {
   jws?: string
 }
 
-const DEFAULT_GRANTS_PATH = join(homedir(), '.2kc', 'grants.json')
+const DEFAULT_GRANTS_PATH = join(CONFIG_DIR, 'grants.json')
 
 export class GrantManager {
   private grants: Map<string, AccessGrant> = new Map()

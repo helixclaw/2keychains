@@ -1,9 +1,9 @@
 import { readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
-import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { CONFIG_DIR } from './config.js'
 
-export const PID_FILE_PATH = resolve(homedir(), '.2kc', 'server.pid')
-export const LOG_FILE_PATH = resolve(homedir(), '.2kc', 'server.log')
+export const PID_FILE_PATH = join(CONFIG_DIR, 'server.pid')
+export const LOG_FILE_PATH = join(CONFIG_DIR, 'server.log')
 
 export function writePid(pid: number): void {
   mkdirSync(dirname(PID_FILE_PATH), { recursive: true })

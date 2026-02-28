@@ -19,6 +19,7 @@ const mockSaveConfig = vi.fn()
 vi.mock('../core/config.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...(args as [])),
   saveConfig: (...args: unknown[]) => mockSaveConfig(...(args as [])),
+  CONFIG_DIR: '/tmp/.2kc',
 }))
 
 const mockInitialize = vi.fn()

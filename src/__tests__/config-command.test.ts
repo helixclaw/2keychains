@@ -14,7 +14,13 @@ vi.mock('node:os', () => ({
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { saveConfig, defaultConfig, CONFIG_PATH, type AppConfig } from '../core/config.js'
+import {
+  saveConfig,
+  defaultConfig,
+  CONFIG_PATH,
+  CONFIG_DIR,
+  type AppConfig,
+} from '../core/config.js'
 
 const mockReadFileSync = vi.mocked(readFileSync)
 const mockWriteFileSync = vi.mocked(writeFileSync)
@@ -91,7 +97,7 @@ describe('config init action', () => {
     const writtenConfig = JSON.parse(writtenJson) as AppConfig
     expect(writtenConfig.mode).toBe('standalone')
     expect(writtenConfig.server).toEqual({ host: '127.0.0.1', port: 2274 })
-    expect(writtenConfig.store).toEqual({ path: '~/.2kc/secrets.json' })
+    expect(writtenConfig.store).toEqual({ path: join(CONFIG_DIR, 'secrets.json') })
   })
 
   it('accepts --mode client flag', async () => {

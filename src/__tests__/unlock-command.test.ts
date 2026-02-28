@@ -19,6 +19,7 @@ const mockLoadConfig = vi.fn<() => AppConfig>()
 
 vi.mock('../core/config.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...(args as [])),
+  CONFIG_DIR: '/tmp/.2kc',
 }))
 
 const mockServiceUnlock = vi.fn<() => Promise<void>>()

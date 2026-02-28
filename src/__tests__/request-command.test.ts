@@ -38,6 +38,7 @@ const mockResolveService = vi.fn<() => Service>()
 
 vi.mock('../core/config.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...(args as [])),
+  CONFIG_DIR: '/tmp/.2kc',
 }))
 
 vi.mock('../core/service.js', () => ({

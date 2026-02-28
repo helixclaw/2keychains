@@ -1,14 +1,13 @@
 import { Command } from 'commander'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
 
-import { loadConfig } from '../core/config.js'
+import { loadConfig, CONFIG_DIR } from '../core/config.js'
 import { resolveService, LocalService } from '../core/service.js'
 import { SessionLock } from '../core/session-lock.js'
 import { promptPassword } from './password-prompt.js'
 
-const ENCRYPTED_STORE_PATH = join(homedir(), '.2kc', 'secrets.enc.json')
+const ENCRYPTED_STORE_PATH = join(CONFIG_DIR, 'secrets.enc.json')
 
 function formatTtl(ms: number): string {
   const seconds = Math.round(ms / 1000)

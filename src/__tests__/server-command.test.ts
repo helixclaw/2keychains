@@ -11,6 +11,7 @@ const mockFork = vi.fn()
 
 vi.mock('../core/config.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...(args as [])),
+  CONFIG_DIR: '/tmp/.2kc',
 }))
 
 vi.mock('../core/pid-manager.js', () => ({

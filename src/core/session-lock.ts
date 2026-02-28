@@ -1,9 +1,8 @@
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, chmodSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { homedir } from 'node:os'
-import type { UnlockConfig } from './config.js'
+import { CONFIG_DIR, type UnlockConfig } from './config.js'
 
-const DEFAULT_SESSION_PATH = join(homedir(), '.2kc', 'session.lock')
+const DEFAULT_SESSION_PATH = join(CONFIG_DIR, 'session.lock')
 
 interface SessionLockFile {
   version: 1

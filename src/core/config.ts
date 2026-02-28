@@ -1,6 +1,9 @@
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { resolve, dirname, join } from 'node:path'
 import { homedir } from 'node:os'
+
+// Resolve config directory from TKC_HOME env var, defaulting to ~/.2kc
+export const CONFIG_DIR = resolve(process.env.TKC_HOME ?? join(homedir(), '.2kc'))
 
 export interface DiscordConfig {
   botToken: string
@@ -37,7 +40,7 @@ export interface AppConfig {
   bindCommand: boolean
 }
 
-export const CONFIG_PATH = resolve(homedir(), '.2kc', 'config.json')
+export const CONFIG_PATH = join(CONFIG_DIR, 'config.json')
 
 export function resolveTilde(p: string): string {
   if (p.startsWith('~/') || p === '~') {
@@ -131,8 +134,8 @@ function parseServerConfig(raw: unknown): ServerConfig {
 }
 
 function parseStoreConfig(raw: unknown): StoreConfig {
-  const defaultPath = '~/.2kc/secrets.enc.json'
-  if (raw === undefined || raw === null) return { path: resolveTilde(defaultPath) }
+  const defaultPath = join(CONFIG_DIR, 'secrets.enc.json')
+  if (raw === undefined || raw === null) return { path: defaultPath }
   if (!isRecord(raw)) {
     throw new Error('store must be an object')
   }
@@ -184,7 +187,7 @@ export function defaultConfig(): AppConfig {
   return {
     mode: 'standalone',
     server: { host: '127.0.0.1', port: 2274 },
-    store: { path: resolveTilde('~/.2kc/secrets.enc.json') },
+    store: { path: join(CONFIG_DIR, 'secrets.enc.json') },
     unlock: { ttlMs: 900_000 },
     discord: undefined,
     requireApproval: {},
@@ -248,4 +251,21 @@ export function saveConfig(config: AppConfig, configPath: string = CONFIG_PATH):
   mkdirSync(dir, { recursive: true })
   writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
   chmodSync(configPath, 0o600)
+}
+
+let cachedConfig: AppConfig | null = null
+let cachedConfigPath: string | null = null
+
+export function getConfig(configPath: string = CONFIG_PATH): AppConfig {
+  if (cachedConfig !== null && cachedConfigPath === configPath) {
+    return cachedConfig
+  }
+  cachedConfig = loadConfig(configPath)
+  cachedConfigPath = configPath
+  return cachedConfig
+}
+
+export function clearConfigCache(): void {
+  cachedConfig = null
+  cachedConfigPath = null
 }

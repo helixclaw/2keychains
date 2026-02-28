@@ -1,11 +1,11 @@
 import { v4 as uuidv4 } from 'uuid'
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { homedir } from 'node:os'
+import { CONFIG_DIR } from './config.js'
 
 import type { SecretEntry, SecretListItem, SecretMetadata, SecretsFile } from './types.js'
 
-const DEFAULT_PATH = join(homedir(), '.2kc', 'secrets.json')
+const DEFAULT_PATH = join(CONFIG_DIR, 'secrets.json')
 
 const REF_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
