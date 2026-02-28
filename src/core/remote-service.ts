@@ -159,12 +159,19 @@ export class RemoteService implements Service {
   }
 
   requests: Service['requests'] = {
-    create: (secretUuids: string[], reason: string, taskRef: string, duration?: number) =>
+    create: (
+      secretUuids: string[],
+      reason: string,
+      taskRef: string,
+      duration?: number,
+      command?: string,
+    ) =>
       this.request<AccessRequest>('POST', '/api/requests', {
         secretUuids,
         reason,
         taskRef,
         duration,
+        command,
       }),
   }
 
@@ -187,7 +194,7 @@ export class RemoteService implements Service {
     }
 
     // 1. Fetch signed grant JWS from server
-    const jwsToken = await this.request<string>(
+    const { jws: jwsToken } = await this.request<{ jws: string }>(
       'GET',
       `/api/grants/${encodeURIComponent(requestId)}/signed`,
     )

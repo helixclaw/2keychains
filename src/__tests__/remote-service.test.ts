@@ -215,6 +215,45 @@ describe('RemoteService', () => {
             reason: 'need it',
             taskRef: 'TASK-1',
             duration: 300,
+            command: undefined,
+          }),
+        }),
+      )
+    })
+
+    it('create() includes command parameter when provided', async () => {
+      const accessRequest = {
+        id: 'req-1',
+        secretUuids: ['sec-1'],
+        reason: 'need it',
+        taskRef: 'TASK-1',
+        durationSeconds: 300,
+        requestedAt: '2026-01-01T00:00:00Z',
+        status: 'pending',
+      }
+      const fetchMock = mockFetchResponse(200, accessRequest)
+      globalThis.fetch = fetchMock
+
+      const service = new RemoteService(makeConfig())
+      const result = await service.requests.create(
+        ['sec-1'],
+        'need it',
+        'TASK-1',
+        300,
+        'echo hello',
+      )
+
+      expect(result).toEqual(accessRequest)
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://127.0.0.1:2274/api/requests',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            secretUuids: ['sec-1'],
+            reason: 'need it',
+            taskRef: 'TASK-1',
+            duration: 300,
+            command: 'echo hello',
           }),
         }),
       )
@@ -241,7 +280,7 @@ describe('RemoteService', () => {
 
   describe('inject (local)', () => {
     it('receives signed grant, verifies JWS, injects locally using SecretInjector', async () => {
-      const fetchMock = mockFetchResponse(200, 'signed.jws.token')
+      const fetchMock = mockFetchResponse(200, { jws: 'signed.jws.token' })
       globalThis.fetch = fetchMock
 
       vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockResolvedValue({
@@ -265,7 +304,7 @@ describe('RemoteService', () => {
     })
 
     it('passes envVarName option to injector', async () => {
-      const fetchMock = mockFetchResponse(200, 'signed.jws.token')
+      const fetchMock = mockFetchResponse(200, { jws: 'signed.jws.token' })
       globalThis.fetch = fetchMock
 
       vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockResolvedValue({
@@ -287,7 +326,7 @@ describe('RemoteService', () => {
     })
 
     it('throws when local store is locked', async () => {
-      const fetchMock = mockFetchResponse(200, 'signed.jws.token')
+      const fetchMock = mockFetchResponse(200, { jws: 'signed.jws.token' })
       globalThis.fetch = fetchMock
 
       vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockResolvedValue({
@@ -311,7 +350,7 @@ describe('RemoteService', () => {
     })
 
     it('throws when JWS verification fails', async () => {
-      const fetchMock = mockFetchResponse(200, 'tampered.jws.token')
+      const fetchMock = mockFetchResponse(200, { jws: 'tampered.jws.token' })
       globalThis.fetch = fetchMock
 
       vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockRejectedValue(
@@ -325,7 +364,7 @@ describe('RemoteService', () => {
     })
 
     it('throws when grant is expired', async () => {
-      const fetchMock = mockFetchResponse(200, 'expired.jws.token')
+      const fetchMock = mockFetchResponse(200, { jws: 'expired.jws.token' })
       globalThis.fetch = fetchMock
 
       vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockRejectedValue(
@@ -348,7 +387,7 @@ describe('RemoteService', () => {
     })
 
     it('throws when injector not configured', async () => {
-      const fetchMock = mockFetchResponse(200, 'signed.jws.token')
+      const fetchMock = mockFetchResponse(200, { jws: 'signed.jws.token' })
       globalThis.fetch = fetchMock
 
       vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockResolvedValue({
@@ -367,7 +406,7 @@ describe('RemoteService', () => {
     })
 
     it('passes SHA-256 hash of command to verifyGrant', async () => {
-      const fetchMock = mockFetchResponse(200, 'signed.jws.token')
+      const fetchMock = mockFetchResponse(200, { jws: 'signed.jws.token' })
       globalThis.fetch = fetchMock
 
       const verifyMock = vi.spyOn(GrantVerifier.prototype, 'verifyGrant').mockResolvedValue({

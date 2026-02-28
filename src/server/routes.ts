@@ -127,7 +127,13 @@ export const routePlugin = fp(
 
     // POST /api/requests — create access request
     fastify.post<{
-      Body: { secretUuids: string[]; reason: string; taskRef: string; duration?: number }
+      Body: {
+        secretUuids: string[]
+        reason: string
+        taskRef: string
+        duration?: number
+        command?: string
+      }
     }>(
       '/api/requests',
       {
@@ -140,14 +146,15 @@ export const routePlugin = fp(
               reason: { type: 'string' },
               taskRef: { type: 'string' },
               duration: { type: 'number' },
+              command: { type: 'string' },
             },
           },
         },
       },
       async (request, reply) => {
-        const { secretUuids, reason, taskRef, duration } = request.body
+        const { secretUuids, reason, taskRef, duration, command } = request.body
         const result = await service.requests
-          .create(secretUuids, reason, taskRef, duration)
+          .create(secretUuids, reason, taskRef, duration, command)
           .catch(handleError)
         return reply.code(201).send(result)
       },
@@ -168,6 +175,40 @@ export const routePlugin = fp(
         },
       },
       async (request) => service.grants.getStatus(request.params.requestId).catch(handleError),
+    )
+
+    // GET /api/grants/:requestId/signed — get signed JWS token only
+    fastify.get<{ Params: { requestId: string } }>(
+      '/api/grants/:requestId/signed',
+      {
+        schema: {
+          params: {
+            type: 'object',
+            required: ['requestId'],
+            properties: {
+              requestId: { type: 'string', minLength: 1 },
+            },
+          },
+        },
+      },
+      async (request) => {
+        const result = await service.grants.getStatus(request.params.requestId).catch(handleError)
+
+        if (result.status !== 'approved') {
+          const err = new Error(`Grant not approved: status is ${result.status}`)
+          ;(err as Error & { statusCode?: number }).statusCode = 400
+          throw err
+        }
+
+        if (!result.jws) {
+          const err = new Error('No signed grant available for this request')
+          ;(err as Error & { statusCode?: number }).statusCode = 404
+          throw err
+        }
+
+        // Return JWS wrapped in object for proper JSON serialization
+        return { jws: result.jws }
+      },
     )
 
     // POST /api/inject — resolve secrets for injection

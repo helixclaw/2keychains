@@ -310,6 +310,34 @@ describe('API Routes', () => {
         'testing',
         'task-1',
         undefined,
+        undefined,
+      )
+
+      await server.close()
+    })
+
+    it('passes command parameter to service', async () => {
+      const service = makeMockService()
+      const server = createServer(service, TEST_TOKEN)
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/requests',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        payload: {
+          secretUuids: ['test-uuid'],
+          reason: 'testing',
+          taskRef: 'task-1',
+          command: 'echo hello',
+        },
+      })
+
+      expect(response.statusCode).toBe(201)
+      expect(service.requests.create).toHaveBeenCalledWith(
+        ['test-uuid'],
+        'testing',
+        'task-1',
+        undefined,
+        'echo hello',
       )
 
       await server.close()
@@ -358,6 +386,98 @@ describe('API Routes', () => {
       const response = await server.inject({
         method: 'GET',
         url: '/api/grants/unknown',
+        headers: authHeaders,
+      })
+
+      expect(response.statusCode).toBe(404)
+
+      await server.close()
+    })
+  })
+
+  describe('GET /api/grants/:requestId/signed', () => {
+    it('returns 200 with JWS object when grant is approved', async () => {
+      const service = makeMockService()
+      const server = createServer(service, TEST_TOKEN)
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/grants/req-123/signed',
+        headers: authHeaders,
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(JSON.parse(response.body)).toEqual({ jws: 'test.jws.token' })
+      expect(service.grants.getStatus).toHaveBeenCalledWith('req-123')
+
+      await server.close()
+    })
+
+    it('returns 400 when grant is pending', async () => {
+      const service = makeMockService()
+      ;(service.grants.getStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: 'pending',
+        grant: undefined,
+        jws: undefined,
+      })
+      const server = createServer(service, TEST_TOKEN)
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/grants/req-123/signed',
+        headers: authHeaders,
+      })
+
+      expect(response.statusCode).toBe(400)
+
+      await server.close()
+    })
+
+    it('returns 400 when grant is rejected', async () => {
+      const service = makeMockService()
+      ;(service.grants.getStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: 'denied',
+        grant: undefined,
+        jws: undefined,
+      })
+      const server = createServer(service, TEST_TOKEN)
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/grants/req-123/signed',
+        headers: authHeaders,
+      })
+
+      expect(response.statusCode).toBe(400)
+
+      await server.close()
+    })
+
+    it('returns 404 when no JWS is available', async () => {
+      const service = makeMockService()
+      ;(service.grants.getStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: 'approved',
+        grant: makeGrantMock(),
+        jws: undefined,
+      })
+      const server = createServer(service, TEST_TOKEN)
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/grants/req-123/signed',
+        headers: authHeaders,
+      })
+
+      expect(response.statusCode).toBe(404)
+
+      await server.close()
+    })
+
+    it('returns 404 when request not found', async () => {
+      const service = makeMockService()
+      ;(service.grants.getStatus as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('Request not found: unknown'),
+      )
+      const server = createServer(service, TEST_TOKEN)
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/grants/unknown/signed',
         headers: authHeaders,
       })
 
