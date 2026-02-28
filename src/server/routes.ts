@@ -39,6 +39,12 @@ export const routePlugin = fp(
   async (fastify: FastifyInstance, opts: RoutePluginOptions) => {
     const { service } = opts
 
+    // GET /api/keys/public — expose server's signing public key for grant verification
+    fastify.get('/api/keys/public', async () => {
+      const publicKey = await service.keys.getPublicKey().catch(handleError)
+      return { publicKey }
+    })
+
     // GET /api/secrets — list secrets (metadata only)
     fastify.get('/api/secrets', async () => service.secrets.list().catch(handleError))
 

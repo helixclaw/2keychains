@@ -1,4 +1,5 @@
 import { join, dirname } from 'node:path'
+import type { KeyObject } from 'node:crypto'
 import type { AppConfig } from './config.js'
 import type { SecretListItem, SecretMetadata, ProcessResult } from './types.js'
 import type { AccessRequest, AccessRequestStatus } from './request.js'
@@ -21,6 +22,10 @@ export type SecretSummary = SecretListItem
 
 export interface Service {
   health(): Promise<{ status: string; uptime?: number }>
+
+  keys: {
+    getPublicKey(): Promise<string>
+  }
 
   secrets: {
     list(): Promise<SecretSummary[]>
@@ -63,6 +68,7 @@ interface LocalServiceDeps {
   requestLog: RequestLog
   startTime: number
   bindCommand: boolean
+  publicKey: KeyObject
 }
 
 export class LocalService implements Service {
@@ -106,6 +112,10 @@ export class LocalService implements Service {
       status: this.deps.unlockSession.isUnlocked() ? 'unlocked' : 'locked',
       uptime: Date.now() - this.deps.startTime,
     }
+  }
+
+  keys: Service['keys'] = {
+    getPublicKey: async () => this.deps.publicKey.export({ type: 'spki', format: 'pem' }) as string,
   }
 
   secrets: Service['secrets'] = {
@@ -214,7 +224,7 @@ export async function resolveService(config: AppConfig): Promise<Service> {
   const grantsPath = join(dirname(config.store.path), 'server-grants.json')
   const requestsPath = join(dirname(config.store.path), 'server-requests.json')
   const keysPath = join(dirname(config.store.path), 'server-keys.json')
-  const { privateKey } = await loadOrGenerateKeyPair(keysPath)
+  const { privateKey, publicKey } = await loadOrGenerateKeyPair(keysPath)
 
   const store = new EncryptedSecretStore(config.store.path)
   const unlockSession = new UnlockSession(config.unlock)
@@ -262,5 +272,6 @@ export async function resolveService(config: AppConfig): Promise<Service> {
     requestLog,
     startTime,
     bindCommand: config.bindCommand,
+    publicKey,
   })
 }

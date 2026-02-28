@@ -25,6 +25,11 @@ function makeGrantMock(overrides?: Partial<AccessGrant>): AccessGrant {
 function makeMockService(): Service {
   return {
     health: vi.fn().mockResolvedValue({ status: 'unlocked' }),
+    keys: {
+      getPublicKey: vi
+        .fn()
+        .mockResolvedValue('-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----'),
+    },
     secrets: {
       list: vi.fn().mockResolvedValue([]),
       add: vi.fn().mockResolvedValue({ uuid: TEST_UUID }),
@@ -55,6 +60,35 @@ function makeMockService(): Service {
 }
 
 describe('API Routes', () => {
+  describe('GET /api/keys/public', () => {
+    it('returns 200 with publicKey field', async () => {
+      const service = makeMockService()
+      const server = createServer(service, TEST_TOKEN)
+      const response = await server.inject({
+        method: 'GET',
+        url: '/api/keys/public',
+        headers: authHeaders,
+      })
+
+      expect(response.statusCode).toBe(200)
+      const body = JSON.parse(response.body)
+      expect(typeof body.publicKey).toBe('string')
+      expect(body.publicKey).toContain('BEGIN PUBLIC KEY')
+      expect(service.keys.getPublicKey).toHaveBeenCalled()
+
+      await server.close()
+    })
+
+    it('returns 401 without auth header', async () => {
+      const server = createServer(makeMockService(), TEST_TOKEN)
+      const response = await server.inject({ method: 'GET', url: '/api/keys/public' })
+
+      expect(response.statusCode).toBe(401)
+
+      await server.close()
+    })
+  })
+
   describe('GET /api/secrets', () => {
     it('returns 200 with secret list', async () => {
       const service = makeMockService()
