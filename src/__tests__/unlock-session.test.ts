@@ -220,4 +220,50 @@ describe('UnlockSession', () => {
       expect(handler).not.toHaveBeenCalled()
     })
   })
+
+  describe('disableTimers()', () => {
+    it('disableTimers() prevents TTL auto-lock', () => {
+      const session = new UnlockSession({ ttlMs: 5000 })
+      session.unlock(makeDek())
+      session.disableTimers()
+      vi.advanceTimersByTime(10_000)
+      expect(session.isUnlocked()).toBe(true)
+    })
+
+    it('disableTimers() prevents idle auto-lock', () => {
+      const session = new UnlockSession({ ttlMs: 60_000, idleTtlMs: 3000 })
+      session.unlock(makeDek())
+      session.disableTimers()
+      vi.advanceTimersByTime(10_000)
+      expect(session.isUnlocked()).toBe(true)
+    })
+
+    it('disableTimers() keeps session unlocked indefinitely', () => {
+      const session = new UnlockSession({ ttlMs: 5000, idleTtlMs: 3000, maxGrantsBeforeRelock: 10 })
+      const handler = vi.fn<[LockReason], void>()
+      session.on('locked', handler)
+      session.unlock(makeDek())
+      session.disableTimers()
+      vi.advanceTimersByTime(1_000_000)
+      expect(session.isUnlocked()).toBe(true)
+      expect(handler).not.toHaveBeenCalled()
+    })
+
+    it('disableTimers() does not prevent manual lock()', () => {
+      const session = new UnlockSession({ ttlMs: 5000 })
+      session.unlock(makeDek())
+      session.disableTimers()
+      session.lock()
+      expect(session.isUnlocked()).toBe(false)
+    })
+
+    it('disableTimers() does not prevent max-grants lock', () => {
+      const session = new UnlockSession({ ttlMs: 60_000, maxGrantsBeforeRelock: 2 })
+      session.unlock(makeDek())
+      session.disableTimers()
+      session.recordGrantUsage()
+      session.recordGrantUsage()
+      expect(session.isUnlocked()).toBe(false)
+    })
+  })
 })

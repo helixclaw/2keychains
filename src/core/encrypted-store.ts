@@ -1,7 +1,6 @@
 import { v4 as uuidv4 } from 'uuid'
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { CONFIG_DIR } from './config.js'
+import { dirname } from 'node:path'
 
 import type { SecretListItem, SecretMetadata } from './types.js'
 import type { ISecretStore } from './secret-store.js'
@@ -9,8 +8,6 @@ import type { EncryptedValue } from './crypto.js'
 import { generateDek, buildAad, encryptValue, decryptValue, wrapDek, unwrapDek } from './crypto.js'
 import { deriveKek, generateSalt, DEFAULT_SCRYPT_PARAMS } from './kdf.js'
 import type { ScryptParams } from './kdf.js'
-
-const DEFAULT_PATH = join(CONFIG_DIR, 'secrets.enc.json')
 
 const REF_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -41,7 +38,7 @@ export class EncryptedSecretStore implements ISecretStore {
   private readonly filePath: string
   private dek: Buffer | null = null
 
-  constructor(filePath: string = DEFAULT_PATH) {
+  constructor(filePath: string) {
     this.filePath = filePath
   }
 

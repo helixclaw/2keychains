@@ -56,6 +56,10 @@ export class UnlockSession extends EventEmitter<UnlockSessionEvents> {
     }
   }
 
+  disableTimers(): void {
+    this.clearTimers()
+  }
+
   private lockInternal(): void {
     if (this.dek !== null) {
       this.dek.fill(0)

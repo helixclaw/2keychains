@@ -2,15 +2,21 @@
 
 import type { AppConfig } from '../core/config.js'
 import type { ChildProcess } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 
 const mockLoadConfig = vi.fn<() => AppConfig>()
 const mockGetRunningPid = vi.fn<() => number | null>()
 const mockWritePid = vi.fn<(pid: number) => void>()
 const mockRemovePidFile = vi.fn<() => void>()
 const mockFork = vi.fn()
+const mockExistsSync = vi.fn<(path: string) => boolean>().mockReturnValue(true)
+const mockPromptPassword = vi.fn<() => Promise<string>>()
+const mockResolveService = vi.fn()
+const mockStartServer = vi.fn()
 
 vi.mock('../core/config.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...(args as [])),
+  getConfig: (...args: unknown[]) => mockLoadConfig(...(args as [])),
   CONFIG_DIR: '/tmp/.2kc',
 }))
 
@@ -29,6 +35,20 @@ vi.mock('node:fs', () => ({
   openSync: vi.fn(() => 3),
   closeSync: vi.fn(),
   mkdirSync: vi.fn(),
+  existsSync: (path: string) => mockExistsSync(path),
+}))
+
+vi.mock('../cli/password-prompt.js', () => ({
+  promptPassword: (...args: unknown[]) => mockPromptPassword(...(args as [])),
+}))
+
+vi.mock('../core/service.js', () => ({
+  resolveService: (...args: unknown[]) => mockResolveService(...args),
+  LocalService: class {},
+}))
+
+vi.mock('../server/app.js', () => ({
+  startServer: (...args: unknown[]) => mockStartServer(...args),
 }))
 
 // Mock http for health check
@@ -81,12 +101,13 @@ function createTestConfig(): AppConfig {
   }
 }
 
-function createMockChildProcess(pid: number): ChildProcess {
-  return {
-    pid,
-    disconnect: vi.fn(),
-    unref: vi.fn(),
-  } as unknown as ChildProcess
+function createMockChildProcess(pid: number): ChildProcess & EventEmitter {
+  const emitter = new EventEmitter() as ChildProcess & EventEmitter
+  emitter.pid = pid
+  emitter.disconnect = vi.fn()
+  emitter.unref = vi.fn()
+  emitter.send = vi.fn().mockReturnValue(true)
+  return emitter
 }
 
 describe('server start command', () => {
@@ -378,5 +399,339 @@ describe('server token generate command', () => {
     const token = logSpy.mock.calls[0][0] as string
     expect(token).toMatch(/^[0-9a-f]{64}$/)
     logSpy.mockRestore()
+  })
+})
+
+describe('server start --unlock', () => {
+  let savedExitCode: number | undefined
+  let originalKill: typeof process.kill
+  let originalEnv: NodeJS.ProcessEnv
+
+  beforeEach(() => {
+    savedExitCode = process.exitCode
+    process.exitCode = undefined
+    originalKill = process.kill
+    originalEnv = { ...process.env }
+    mockLoadConfig.mockReturnValue(createTestConfig())
+    mockHealthResponse = { statusCode: 200, data: '{"status":"ok","pid":12345,"uptime":100}' }
+    mockExistsSync.mockReturnValue(true)
+    mockPromptPassword.mockResolvedValue('test-password')
+  })
+
+  afterEach(() => {
+    process.exitCode = savedExitCode
+    process.kill = originalKill
+    process.env = originalEnv
+    vi.clearAllMocks()
+  })
+
+  it('rejects --unlock in client mode', async () => {
+    mockGetRunningPid.mockReturnValue(null)
+    mockLoadConfig.mockReturnValue({
+      ...createTestConfig(),
+      mode: 'client',
+    })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { serverCommand } = await import('../cli/server.js')
+    await serverCommand.parseAsync(['start', '--unlock'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith('Error: --unlock is not supported in client mode.')
+    expect(process.exitCode).toBe(1)
+    errorSpy.mockRestore()
+  })
+
+  it('rejects --unlock when store does not exist', async () => {
+    mockGetRunningPid.mockReturnValue(null)
+    mockExistsSync.mockReturnValue(false)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { serverCommand } = await import('../cli/server.js')
+    await serverCommand.parseAsync(['start', '--unlock'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Error: Encrypted store not found. Run store initialization first.',
+    )
+    expect(process.exitCode).toBe(1)
+    errorSpy.mockRestore()
+  })
+
+  it('uses password from env var when available', async () => {
+    mockGetRunningPid.mockReturnValue(null)
+    process.env['2KC_UNLOCK_PASSWORD'] = 'env-password'
+
+    const child = createMockChildProcess(54321)
+    mockFork.mockReturnValue(child)
+
+    const { serverCommand } = await import('../cli/server.js')
+    const parsePromise = serverCommand.parseAsync(['start', '--unlock'], { from: 'user' })
+
+    // Simulate ready and unlock-result
+    await vi.waitFor(() => {
+      expect(child.listenerCount('message')).toBeGreaterThan(0)
+    })
+    child.emit('message', { type: 'ready' })
+    await vi.waitFor(() => {
+      expect(child.send).toHaveBeenCalledWith({ type: 'unlock', password: 'env-password' })
+    })
+    child.emit('message', { type: 'unlock-result', success: true })
+
+    await parsePromise
+
+    expect(mockPromptPassword).not.toHaveBeenCalled()
+    delete process.env['2KC_UNLOCK_PASSWORD']
+  })
+
+  it('successfully unlocks via IPC when child sends ready and unlock-result', async () => {
+    mockGetRunningPid.mockReturnValue(null)
+
+    const child = createMockChildProcess(54321)
+    mockFork.mockReturnValue(child)
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    const { serverCommand } = await import('../cli/server.js')
+    const parsePromise = serverCommand.parseAsync(['start', '--unlock'], { from: 'user' })
+
+    // Simulate IPC flow
+    await vi.waitFor(() => {
+      expect(child.listenerCount('message')).toBeGreaterThan(0)
+    })
+    child.emit('message', { type: 'ready' })
+    await vi.waitFor(() => {
+      expect(child.send).toHaveBeenCalledWith({ type: 'unlock', password: 'test-password' })
+    })
+    child.emit('message', { type: 'unlock-result', success: true })
+
+    await parsePromise
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('(unlocked)'))
+    logSpy.mockRestore()
+  })
+
+  it('handles unlock failure from child', async () => {
+    mockGetRunningPid.mockReturnValue(null)
+
+    const child = createMockChildProcess(54321)
+    mockFork.mockReturnValue(child)
+
+    const mockKill = vi.fn()
+    process.kill = mockKill as unknown as typeof process.kill
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { serverCommand } = await import('../cli/server.js')
+    const parsePromise = serverCommand.parseAsync(['start', '--unlock'], { from: 'user' })
+
+    // Simulate IPC flow with failure
+    await vi.waitFor(() => {
+      expect(child.listenerCount('message')).toBeGreaterThan(0)
+    })
+    child.emit('message', { type: 'ready' })
+    await vi.waitFor(() => {
+      expect(child.send).toHaveBeenCalled()
+    })
+    child.emit('message', { type: 'unlock-result', success: false, error: 'Incorrect password' })
+
+    await parsePromise
+
+    expect(errorSpy).toHaveBeenCalledWith('Failed to unlock: Incorrect password')
+    expect(mockKill).toHaveBeenCalledWith(54321, 'SIGTERM')
+    expect(mockRemovePidFile).toHaveBeenCalled()
+    expect(process.exitCode).toBe(1)
+    errorSpy.mockRestore()
+  })
+
+  it('handles child exit before unlock completes', async () => {
+    mockGetRunningPid.mockReturnValue(null)
+
+    const child = createMockChildProcess(54321)
+    mockFork.mockReturnValue(child)
+
+    const mockKill = vi.fn()
+    process.kill = mockKill as unknown as typeof process.kill
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { serverCommand } = await import('../cli/server.js')
+    const parsePromise = serverCommand.parseAsync(['start', '--unlock'], { from: 'user' })
+
+    // Simulate child exit before unlock completes
+    await vi.waitFor(() => {
+      expect(child.listenerCount('exit')).toBeGreaterThan(0)
+    })
+    child.emit('exit', 1)
+
+    await parsePromise
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Failed to unlock: Server exited with code 1 before unlock completed',
+    )
+    expect(mockRemovePidFile).toHaveBeenCalled()
+    expect(process.exitCode).toBe(1)
+    errorSpy.mockRestore()
+  })
+
+  it('handles child error event', async () => {
+    mockGetRunningPid.mockReturnValue(null)
+
+    const child = createMockChildProcess(54321)
+    mockFork.mockReturnValue(child)
+
+    const mockKill = vi.fn()
+    process.kill = mockKill as unknown as typeof process.kill
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { serverCommand } = await import('../cli/server.js')
+    const parsePromise = serverCommand.parseAsync(['start', '--unlock'], { from: 'user' })
+
+    // Simulate child error
+    await vi.waitFor(() => {
+      expect(child.listenerCount('error')).toBeGreaterThan(0)
+    })
+    child.emit('error', new Error('spawn ENOENT'))
+
+    await parsePromise
+
+    expect(errorSpy).toHaveBeenCalledWith('Failed to unlock: Child process error: spawn ENOENT')
+    expect(mockRemovePidFile).toHaveBeenCalled()
+    expect(process.exitCode).toBe(1)
+    errorSpy.mockRestore()
+  })
+
+  it('handles kill throwing during unlock cleanup', async () => {
+    mockGetRunningPid.mockReturnValue(null)
+
+    const child = createMockChildProcess(54321)
+    mockFork.mockReturnValue(child)
+
+    // Mock kill to throw (process may have already exited)
+    const mockKill = vi.fn().mockImplementation(() => {
+      throw new Error('ESRCH')
+    })
+    process.kill = mockKill as unknown as typeof process.kill
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { serverCommand } = await import('../cli/server.js')
+    const parsePromise = serverCommand.parseAsync(['start', '--unlock'], { from: 'user' })
+
+    // Simulate unlock failure
+    await vi.waitFor(() => {
+      expect(child.listenerCount('message')).toBeGreaterThan(0)
+    })
+    child.emit('message', { type: 'ready' })
+    await vi.waitFor(() => {
+      expect(child.send).toHaveBeenCalled()
+    })
+    child.emit('message', { type: 'unlock-result', success: false })
+
+    await parsePromise
+
+    // Should still clean up even when kill throws
+    expect(mockRemovePidFile).toHaveBeenCalled()
+    expect(process.exitCode).toBe(1)
+    errorSpy.mockRestore()
+  })
+})
+
+describe('server start --unlock --foreground', () => {
+  let savedExitCode: number | undefined
+  let originalEnv: NodeJS.ProcessEnv
+
+  beforeEach(() => {
+    savedExitCode = process.exitCode
+    process.exitCode = undefined
+    originalEnv = { ...process.env }
+    mockLoadConfig.mockReturnValue(createTestConfig())
+    mockExistsSync.mockReturnValue(true)
+    mockPromptPassword.mockResolvedValue('test-password')
+  })
+
+  afterEach(() => {
+    process.exitCode = savedExitCode
+    process.env = originalEnv
+    vi.clearAllMocks()
+  })
+
+  it('unlocks and starts server in foreground', async () => {
+    mockGetRunningPid.mockReturnValue(null)
+    const mockService = {
+      unlock: vi.fn().mockResolvedValue(undefined),
+    }
+    mockResolveService.mockResolvedValue(mockService)
+    mockStartServer.mockResolvedValue(undefined)
+
+    const { serverCommand } = await import('../cli/server.js')
+    await serverCommand.parseAsync(['start', '--unlock', '--foreground'], { from: 'user' })
+
+    expect(mockService.unlock).toHaveBeenCalledWith('test-password', { serverMode: true })
+    expect(mockStartServer).toHaveBeenCalled()
+    expect(process.exitCode).toBeUndefined()
+  })
+
+  it('shows error for incorrect password in foreground mode', async () => {
+    mockGetRunningPid.mockReturnValue(null)
+    const mockService = {
+      unlock: vi.fn().mockRejectedValue(new Error('Incorrect password')),
+    }
+    mockResolveService.mockResolvedValue(mockService)
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { serverCommand } = await import('../cli/server.js')
+    await serverCommand.parseAsync(['start', '--unlock', '--foreground'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith('Incorrect password.')
+    expect(process.exitCode).toBe(1)
+    expect(mockStartServer).not.toHaveBeenCalled()
+    errorSpy.mockRestore()
+  })
+})
+
+describe('health check timeout', () => {
+  beforeEach(() => {
+    mockLoadConfig.mockReturnValue(createTestConfig())
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('handles health check timeout', async () => {
+    // This tests the timeout branch in healthCheck function
+    // We need to trigger the 'timeout' event on the request
+    const mockReq = {
+      on: vi.fn((event: string, handler: () => void) => {
+        if (event === 'timeout') {
+          setTimeout(() => handler(), 0)
+        }
+        return mockReq
+      }),
+      destroy: vi.fn(),
+    }
+
+    const http = await import('node:http')
+    vi.mocked(http.default.get).mockImplementation(
+      () => mockReq as unknown as ReturnType<typeof http.default.get>,
+    )
+
+    mockGetRunningPid.mockReturnValue(null)
+    mockFork.mockReturnValue(createMockChildProcess(54321))
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const mockKill = vi.fn()
+    const originalKill = process.kill
+    process.kill = mockKill as unknown as typeof process.kill
+
+    const { serverCommand } = await import('../cli/server.js')
+    await serverCommand.parseAsync(['start'], { from: 'user' })
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('health check failed'))
+    expect(process.exitCode).toBe(1)
+
+    process.kill = originalKill
+    errorSpy.mockRestore()
   })
 })

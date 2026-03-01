@@ -97,12 +97,24 @@ export class LocalService implements Service {
   }
 
   // Called by `2kc unlock` CLI command — not on the Service interface
-  async unlock(password: string): Promise<void> {
+  async unlock(
+    password: string,
+    options?: { persist?: boolean; serverMode?: boolean },
+  ): Promise<void> {
     await this.deps.store.unlock(password)
     const dek = this.deps.store.getDek()
     if (!dek) throw new Error('Failed to obtain DEK after unlock')
     this.deps.unlockSession.unlock(dek)
-    this.deps.sessionLock.save(dek)
+
+    // Server mode: disable TTL/idle timers (stay unlocked until process ends)
+    if (options?.serverMode) {
+      this.deps.unlockSession.disableTimers()
+    }
+
+    // Only persist to session.lock if not in server mode
+    if (options?.persist !== false && !options?.serverMode) {
+      this.deps.sessionLock.save(dek)
+    }
   }
 
   isUnlocked(): boolean {

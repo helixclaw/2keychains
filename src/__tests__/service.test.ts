@@ -95,6 +95,7 @@ function makeService() {
     off: vi.fn(),
     unlock: vi.fn(),
     lock: vi.fn(),
+    disableTimers: vi.fn(),
   } as unknown as UnlockSession
 
   const grantManager = {
@@ -437,6 +438,49 @@ describe('LocalService', () => {
       ;(store.getDek as MockInstance).mockReturnValue(null)
 
       await expect(service.unlock('pw')).rejects.toThrow('Failed to obtain DEK after unlock')
+    })
+
+    it('does not persist session when serverMode is true', async () => {
+      const { service, store, unlockSession, sessionLock } = makeService()
+      ;(store.unlock as MockInstance).mockResolvedValue(undefined)
+      ;(store.getDek as MockInstance).mockReturnValue(Buffer.alloc(32, 0xaa))
+
+      await service.unlock('test-password', { serverMode: true })
+
+      expect(store.unlock).toHaveBeenCalledWith('test-password')
+      expect(unlockSession.unlock).toHaveBeenCalledWith(Buffer.alloc(32, 0xaa))
+      expect(sessionLock.save).not.toHaveBeenCalled()
+    })
+
+    it('calls disableTimers when serverMode is true', async () => {
+      const { service, store, unlockSession } = makeService()
+      ;(store.unlock as MockInstance).mockResolvedValue(undefined)
+      ;(store.getDek as MockInstance).mockReturnValue(Buffer.alloc(32, 0xaa))
+
+      await service.unlock('test-password', { serverMode: true })
+
+      expect(unlockSession.disableTimers).toHaveBeenCalled()
+    })
+
+    it('does not call disableTimers when serverMode is false', async () => {
+      const { service, store, unlockSession, sessionLock } = makeService()
+      ;(store.unlock as MockInstance).mockResolvedValue(undefined)
+      ;(store.getDek as MockInstance).mockReturnValue(Buffer.alloc(32, 0xaa))
+
+      await service.unlock('test-password', { serverMode: false })
+
+      expect(unlockSession.disableTimers).not.toHaveBeenCalled()
+      expect(sessionLock.save).toHaveBeenCalled()
+    })
+
+    it('does not persist when persist is false', async () => {
+      const { service, store, sessionLock } = makeService()
+      ;(store.unlock as MockInstance).mockResolvedValue(undefined)
+      ;(store.getDek as MockInstance).mockReturnValue(Buffer.alloc(32, 0xaa))
+
+      await service.unlock('test-password', { persist: false })
+
+      expect(sessionLock.save).not.toHaveBeenCalled()
     })
   })
 

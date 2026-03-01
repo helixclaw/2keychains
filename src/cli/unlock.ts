@@ -1,13 +1,10 @@
 import { Command } from 'commander'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
 
-import { loadConfig, CONFIG_DIR } from '../core/config.js'
+import { loadConfig, getConfig } from '../core/config.js'
 import { resolveService, LocalService } from '../core/service.js'
 import { SessionLock } from '../core/session-lock.js'
 import { promptPassword } from './password-prompt.js'
-
-const ENCRYPTED_STORE_PATH = join(CONFIG_DIR, 'secrets.enc.json')
 
 function formatTtl(ms: number): string {
   const seconds = Math.round(ms / 1000)
@@ -33,7 +30,7 @@ unlockCommand.action(async () => {
     return
   }
 
-  if (!existsSync(ENCRYPTED_STORE_PATH)) {
+  if (!existsSync(config.store.path)) {
     console.error('Error: Encrypted store not found. Run store initialization first.')
     process.exitCode = 1
     return
@@ -54,7 +51,7 @@ unlockCommand.action(async () => {
 const lockCommand = new Command('lock').description('Lock the encrypted secret store')
 
 lockCommand.action(async () => {
-  const config = loadConfig()
+  const config = getConfig()
   const service = (await resolveService(config)) as LocalService
   service.lock()
   console.log('Store locked.')
@@ -65,12 +62,11 @@ const statusCommand = new Command('status').description(
 )
 
 statusCommand.action(() => {
-  if (!existsSync(ENCRYPTED_STORE_PATH)) {
+  const config = getConfig()
+  if (!existsSync(config.store.path)) {
     console.log('Encrypted store not found. Run store initialization first.')
     return
   }
-
-  const config = loadConfig()
   const sessionLock = new SessionLock(config.unlock)
 
   if (sessionLock.exists()) {

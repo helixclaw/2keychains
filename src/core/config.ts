@@ -8,6 +8,7 @@ import { createErrorMap, createMessageBuilder, NonEmptyArray } from 'zod-validat
 export const CONFIG_DIR = resolve(process.env.TKC_HOME ?? join(homedir(), '.2kc'))
 
 export const CONFIG_PATH = join(CONFIG_DIR, 'config.json')
+const DEFAULT_STORE_PATH = join(CONFIG_DIR, 'secrets.enc.json')
 
 export function resolveTilde(p: string): string {
   if (p.startsWith('~/') || p === '~') {
@@ -72,7 +73,7 @@ const StoreConfigSchema = z
     path: zNonEmptyString().optional(),
   })
   .transform((val) => ({
-    path: val.path ? resolveTilde(val.path) : join(CONFIG_DIR, 'secrets.enc.json'),
+    path: val.path ? resolveTilde(val.path) : DEFAULT_STORE_PATH,
   }))
 
 // Unlock config schema
@@ -157,21 +158,3 @@ export function getConfig(configPath: string = CONFIG_PATH): AppConfig {
   }
   return configCache[configPath]
 }
-
-// try {
-//   parseConfig({
-//     server: {
-//       port: 0,
-//       host: '',
-//     },
-//     defaultRequireApproval: 'not a boolean',
-//   })
-// } catch (err) {
-//   if (err instanceof ZodError) {
-//     console.error(`Error loading config:`)
-//     console.error(messageBuilder(err.issues))
-//   } else {
-//     console.error(`Error loading config: ${String(err)}`)
-//   }
-//   process.exit(1)
-// }
